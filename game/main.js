@@ -97,7 +97,7 @@ const MAX_PLACED = 9;
 
 // ------------------------------------------------------------------ app state
 const app = {
-    mode: "title",          // title | chart | plan | fly | result
+    mode: "title",          // title | chart | plan | fly | ended | result
     paused: false,
     levelIndex: 0,
     level: TITLE_LEVEL,
@@ -137,7 +137,7 @@ function titleView(t) {
 const view = titleView(0);
 function updateCamera(dt) {
     const goal = app.mode === "title" || app.mode === "chart" ? titleView(app.titleT) : homeView();
-    const par = reducedMotion() || drag || (app.mode !== "plan" && app.mode !== "fly") ? 0 : 1;
+    const par = reducedMotion() || drag || (app.mode !== "plan" && app.mode !== "fly" && app.mode !== "ended") ? 0 : 1;
     const k = 1 - Math.exp(-dt * 3.2);
     // take the short way round for yaw
     const dy = ((goal.yaw + pointer.nx * 0.045 * par - view.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
@@ -445,6 +445,8 @@ const REASONS = {
 };
 
 function endFlight() {
+    // "ended" stops the update loop from calling this again while the result / reset timer runs
+    app.mode = "ended";
     const s = app.sim, c = s.comet, token = ++app.token;
     world.comet.visible = false;
     if (s.status === "won") {
@@ -490,7 +492,6 @@ function showResult(stars, time) {
 // ------------------------------------------------------------------ pause + settings
 function setPaused(on) {
     if (app.mode !== "plan" && app.mode !== "fly") return;
-    if (on && app.sim && app.sim.status !== "flying") return; // the flight just ended; the result is about to appear
     app.paused = on;
     if (on) game.pause(); else game.resume();
     show("pause", on);
@@ -592,7 +593,7 @@ game.onRender((frameDelta) => {
     const now = performance.now();
     if (app.hintUntil && now > app.hintUntil) { world.setHint([]); app.hintUntil = 0; if (app.mode === "plan") setStatus(app.level.intro); }
     updateCamera(frameDelta);
-    const simT = app.mode === "fly" ? app.simT : app.mode === "title" || app.mode === "chart" ? app.titleT : 0;
+    const simT = app.mode === "fly" || app.mode === "ended" ? app.simT : app.mode === "title" || app.mode === "chart" ? app.titleT : 0;
     world.frame(game.loop.realTime, simT, frameDelta, !app.paused && !game.juice.frozen);
     if (app.mode === "plan" && app.previewDirty) {
         app.previewDirty = false;
