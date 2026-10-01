@@ -1,0 +1,7 @@
+{
+  "name": "orbital",
+  "private": true,
+  "type": "module",
+  "description": "ORBITAL: a gravity-slingshot puzzle game built on Projection Lab",
+  "scripts": { "solve": "node tools/solve.mjs" }
+}
