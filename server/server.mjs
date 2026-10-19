@@ -41,7 +41,7 @@ const log = (line) => { if (!QUIET) console.log(`${new Date().toISOString().slic
 const TYPES = {
     ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8", ".woff2": "font/woff2", ".svg": "image/svg+xml",
-    ".png": "image/png", ".jpg": "image/jpeg", ".glb": "model/gltf-binary", ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+    ".png": "image/png", ".jpg": "image/jpeg", ".glb": "model/gltf-binary", ".ogg": "audio/ogg", ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8",
 };
 /** never served, whatever is asked for */
 const PRIVATE = /(^|[\\/])(\.|node_modules([\\/]|$)|package-lock\.json$)/;

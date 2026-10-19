@@ -1,5 +1,5 @@
 /**
- * Audio: procedural sound effects (ZzFX, MIT) + an ambient drone, behind our own mixer.
+ * Audio: recorded or procedural sound effects (ZzFX, MIT) + an ambient drone, behind our own mixer.
  *
  * Nothing is created until `unlock()` runs inside a user gesture (browsers block audio before that, and
  * creating an AudioContext early prints a console warning). ZzFX is imported lazily at that moment and only
@@ -8,7 +8,11 @@
  *   source ─► panner ─► channel gain (sfx | music) ─► master gain ─► speakers
  *
  *   audio.define("pop", [1.2, .05, 520, .01, .02, .1, , 1.8]);   // ZzFX parameters
+ *   audio.load("pop", ["sounds/pop1.ogg", "sounds/pop2.ogg"]);  // recorded takes; one is picked per play
  *   button.onclick = async () => { await audio.unlock(); audio.play("pop", { pitch: 1.1 }); };
+ *
+ * A loaded sound wins over a defined one of the same name; until its files decode (or if they fail to) the ZzFX
+ * version plays, so a missing file is never silence.
  *
  * ZzFX by Frank Force, MIT: https://github.com/KilledByAPixel/ZzFX (vendored at vendor/zzfx@1.3.2)
  * @module engine/Audio
@@ -25,6 +29,10 @@ export class Audio {
         this.defs = new Map();
         /** @type {Map<string, AudioBuffer>} */
         this.buffers = new Map();
+        /** @type {Map<string, string[]>} */
+        this.urls = new Map();
+        /** @type {Map<string, AudioBuffer[]>} decoded recordings, by name */
+        this.takes = new Map();
         this._zzfx = null;
         this._unlocking = null;
         this._drone = null;
@@ -34,6 +42,25 @@ export class Audio {
 
     /** Register a named sound from ZzFX parameters (build the array at https://killedbyapixel.github.io/ZzFX/). */
     define(name, params) { this.defs.set(name, params); this.buffers.delete(name); return this; }
+
+    /**
+     * Register a named sound from audio files (any the browser decodes; .ogg/.mp3/.wav). Decoding starts at unlock().
+     * @param {string} name @param {string | string[]} urls several takes are picked at random, so repeats vary
+     */
+    load(name, urls) {
+        this.urls.set(name, [].concat(urls));
+        if (this.ctx) this._decode(name);
+        return this;
+    }
+
+    async _decode(name) {
+        const takes = await Promise.all(this.urls.get(name).map(async (url) => {
+            try { return await this.ctx.decodeAudioData(await (await fetch(url)).arrayBuffer()); }
+            catch (e) { console.warn(`Audio: could not load ${url}`, e.message); return null; }
+        }));
+        const good = takes.filter(Boolean);
+        if (good.length) this.takes.set(name, good);
+    }
 
     /** Create the audio graph. Call from a click / key / touch handler. Safe to call repeatedly. */
     unlock() {
@@ -49,9 +76,10 @@ export class Audio {
             this._applyVolumes();
             const mod = await import(ZZFX_URL);
             // ZzFX makes its own AudioContext on import; we only need its sample generator
-            try { mod.ZZFX.audioContext?.close?.(); } catch (e) { /* already closed */ }
+            if (mod.ZZFX.audioContext?.state !== "closed") mod.ZZFX.audioContext?.close?.().catch(() => { /* already closed */ });
             this._zzfx = mod.ZZFX;
             if (this.ctx.state === "suspended") await this.ctx.resume();
+            for (const name of this.urls.keys()) this._decode(name);
         })();
         return this._unlocking;
     }
@@ -74,7 +102,8 @@ export class Audio {
      */
     play(name, opts = {}) {
         if (!this.ready || this.muted) return null;
-        let buffer = this.buffers.get(name);
+        const takes = this.takes.get(name);
+        let buffer = takes ? takes[(Math.random() * takes.length) | 0] : this.buffers.get(name);
         if (!buffer) {
             const params = this.defs.get(name);
             if (!params) return null;

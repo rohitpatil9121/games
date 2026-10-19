@@ -1,7 +1,8 @@
 import { Audio } from "../engine/index.js";
 
 /**
- * BREACH: sound. Every effect is synthesised (ZzFX through the engine's Audio); there are no audio files.
+ * BREACH: sound. Most effects are recordings from Kenney's CC0 packs (assets/sounds); each also has a ZzFX
+ * version, which plays until its file decodes and stands in if it never does.
  *
  * The engine plays a sound at a volume and a stereo position. This adds *where*: at() works out both
  * from the listener (the camera), so a shot to the left is on the left and a far one is quiet. Hearing
@@ -37,6 +38,32 @@ const SOUNDS = {
     lose: [0.7, 0, 300, 0.05, 0.25, 0.8, 0, 1, -6, 0, 0, 0, 0, 0, 0, 0, 0.1, 0.5, 0.3],
     chat: [0.3, 0, 880, 0, 0.01, 0.05, 0, 1.2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.02],
 };
+/** recorded takes for a sound, in assets/sounds; several takes are picked at random */
+const FILES = {
+    pistol: ["laserSmall_000", "laserSmall_001"],
+    smg: ["laserRetro_000", "laserRetro_001"],
+    shotgun: ["explosionCrunch_000"],
+    rifle: ["laserLarge_000", "laserLarge_002"],
+    launcher: ["phaserDown1"],
+    explode: ["lowFrequency_explosion_000"],
+    hit: ["impactPlate_light_000"],
+    kill: ["confirmation_002"],
+    hurt: ["impactPunch_medium_000"],
+    death: ["impactPunch_heavy_000"],
+    step: ["footstep_concrete_000", "footstep_concrete_001", "footstep_concrete_002", "footstep_concrete_003", "footstep_concrete_004"],
+    jump: ["phaseJump1"],
+    land: ["impactSoft_medium_000"],
+    pickup: ["powerUp2"],
+    weapon: ["powerUp5"],
+    overcharge: ["forceField_000"],
+    pad: ["phaserUp3"],
+    switch: ["switch_003"],
+    spawn: ["highUp"],
+    ui: ["select_001"],
+    win: ["powerUp11"],
+    lose: ["lowDown"],
+    chat: ["pluck_001"],
+};
 /** how far each sound carries, in metres; the rest carry 30 */
 const REACH = { step: 16, jump: 14, land: 16, switch: 8, pickup: 22, weapon: 22, explode: 90, shotgun: 70, rifle: 90, pistol: 60, smg: 55, launcher: 50 };
 export const WEAPON_SOUND = ["pistol", "smg", "shotgun", "rifle", "launcher"];
@@ -46,6 +73,7 @@ export class Sound {
     constructor(options = {}) {
         this.audio = new Audio({ volume: options.volume ?? 0.8, sfx: 1, music: 0.5 });
         for (const name in SOUNDS) this.audio.define(name, SOUNDS[name]);
+        for (const name in FILES) this.audio.load(name, FILES[name].map((f) => `assets/sounds/${f}.ogg`));
         /** the listener: where the camera is and which way is its right */
         this.ear = { x: 0, y: 0, z: 0, rx: 1, ry: 0 };
         this.started = false;
