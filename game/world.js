@@ -117,7 +117,8 @@ export class World {
         this.glows = particles({ capacity: 600, gravity: [0, 0, 0.4], drag: 2.5, name: "glows" });
         this._sample = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, flags: 0, prop: -1, propYaw: 0, speed: 0 };
         this.propMaterial = new StandardMaterial({ vertexColors: true, specular: 0.3, shininess: 24 });
-        this.outlineMaterial = new BasicMaterial({ lit: false, color: [1.0, 0.85, 0.2], cull: "front" });
+        // a revealed prop glows through walls: the hull is drawn with no depth test, after everything solid
+        this.outlineMaterial = new BasicMaterial({ lit: false, color: [1.0, 0.85, 0.2], cull: "front", transparent: true, opacity: 0.55, depthTest: false, depthWrite: false });
         this.seekerMaterial = new StandardMaterial({ color: [1, 1, 1], specular: 0.4 });
         this._capsule = primitives.capsule(0.32, 1.1, 6, 14);
         this.time = 0;

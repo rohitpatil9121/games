@@ -117,6 +117,119 @@ console.log("hit shapes");
     check("a scan through a bollard's thin side, 0.2 m up, still hits it", hp() === 100 - SCANNER.damage * 2);
 }
 
+// ------------------------------------------------------------------ seeking
+console.log("seeking");
+{
+    const { state, h, s } = duel();
+    put(h, 0, -6); put(s, -6, -6);
+    const idle = () => input({ seq: ++h.seq });
+    // hold the trigger aimed at a wall: charge drains, then the scanner stops
+    const wall = { yaw: quantizeYaw(-Math.PI / 2), pitch: 0 };
+    let shots = 0;
+    for (let i = 0; i < 200; i++) { run(state, new Map([[2, input({ seq: ++s.seq, buttons: BTN.fire, ...wall })], [1, idle()]])); if (state.events.some((e) => e.type === "shot")) shots++; }
+    check("the scanner runs dry", shots === Math.floor(SCANNER.charge / SCANNER.cost) && s.charge < SCANNER.cost, shots + " scans on one charge");
+    run(state, new Map([[2, input({ seq: ++s.seq, ...wall })], [1, idle()]]), Math.ceil((SCANNER.rest + SCANNER.charge / SCANNER.recharge) * TICK_RATE) + 2);
+    check("and charges again after a rest", s.charge === SCANNER.charge);
+    check("a wall costs nothing", s.health === 100);
+    // a real prop: the crate row along y = −10.8
+    const crate = map.props.find((q) => PROP_LIST[q.type].id === "crate" && q.z === 0);
+    put(s, crate.x, crate.y + 4);
+    const at = aimAt(s, crate.x, crate.y, 0.25);
+    run(state, new Map([[2, input({ seq: ++s.seq, buttons: BTN.fire, ...at })], [1, idle()]]));
+    check("scanning a real prop costs the seeker", s.health === 100 - SCANNER.penalty, "health " + s.health);
+    for (let i = 0; i < 12 && s.alive; i++) run(state, new Map([[2, input({ seq: ++s.seq, buttons: BTN.fire, ...at })], [1, idle()]]), SCANNER.interval);
+    check("ten of those and the seeker is out", !s.alive, "alive " + s.alive);
+    run(state, new Map());
+    check("which ends the round for the hiders when they were the last seeker", state.phase === "end" && state.winner === h.team);
+}
+{
+    const { state, h, s } = duel();
+    put(h, 0, -6); put(s, -6, -6);
+    const at = aimAt(s, 0, -6, 0.2);
+    for (let i = 0; i < 10 && h.alive; i++) run(state, new Map([[2, input({ seq: ++s.seq, buttons: BTN.fire, ...at })], [1, input({ seq: ++h.seq })]]), SCANNER.interval);
+    check("scanning the hider finds it", !h.alive && s.finds === 1 && s.health === 100);
+    check("finding the last hider ends the round for the seekers", state.phase === "end" && state.winner === s.team);
+}
+{
+    // ping grenade: hiders near where it lands and one far; the outline goes to the thrower alone
+    const state = createState(map, { seed: 9 });
+    const a = addPlayer(state, map, 1, "A", { team: 1 }), b = addPlayer(state, map, 3, "B", { team: 1 }), c = addPlayer(state, map, 5, "C", { team: 1 }), s = addPlayer(state, map, 2, "S", { team: 2 });
+    startRound(state, map); state.phase = "seek"; state.timeLeft = 100 * TICK_RATE; s.frozen = false;
+    put(s, -2, -6); put(a, 6.5, -9); put(b, 6, -8); put(c, 12, 8);
+    const look = { yaw: quantizeYaw(-0.35), pitch: quantizePitch(-0.25) };
+    const quiet = () => new Map([[1, input({ seq: ++a.seq })], [3, input({ seq: ++b.seq })], [5, input({ seq: ++c.seq })]]);
+    const m = quiet(); m.set(2, input({ seq: ++s.seq, buttons: BTN.ability, ...look }));
+    run(state, m);
+    const events = [];
+    for (let i = 0; i < 200 && !events.some((e) => e.type === "ping"); i++) { const q = quiet(); q.set(2, input({ seq: ++s.seq, ...look })); run(state, q); events.push(...state.events); }
+    const ping = events.find((e) => e.type === "ping"), land = events.find((e) => e.type === "land");
+    check("a ping grenade flies, lands and bursts", !!ping && !!land, land ? "landed at " + [land.x, land.y, land.z].map((v) => v.toFixed(1)).join(" ") : "");
+    const near = land ? [a, b, c].filter((p) => Math.hypot(p.x - land.x, p.y - land.y, p.z + p.h / 2 - land.z) < PING.radius).map((p) => p.id).sort() : [];
+    check("it finds the hiders inside its radius and no others", ping && near.length > 0 && JSON.stringify([...ping.ids].sort()) === JSON.stringify(near), JSON.stringify(ping && ping.ids) + " vs " + JSON.stringify(near));
+    check("its result is addressed to the thrower alone", ping && ping.to === s.id);
+    check("everyone hears each found prop squeak", events.filter((e) => e.type === "squeak").length === near.length);
+    check("one grenade spent of two", s.pings === PING.perRound - 1);
+}
+{
+    // the round: blindfold, the clock, sides swapping, four rounds
+    const room = new Room({ map: "greybox", bots: 4, seed: 5, hide: 2, seek: 6 });
+    const state = room.state;
+    for (let i = 0; i < 3; i++) room.tick();
+    const seekers = state.players.filter((p) => p.role === ROLE.seeker), hiders = state.players.filter((p) => p.role === ROLE.hider);
+    check("round 1: two hide, two seek", state.phase === "hide" && seekers.length === 2 && hiders.length === 2);
+    const where = seekers.map((p) => [p.x, p.y]);
+    const sk = seekers[0];
+    // a seeker asking to move while blindfolded goes nowhere
+    const brain = room.brains.get(sk.id);
+    room.brains.delete(sk.id); room.inputs.set(sk.id, input({ seq: 1, my: 127 }));
+    for (let i = 0; i < 60; i++) room.tick();
+    check("seekers can't move while blindfolded", seekers.every((p, i) => p.x === where[i][0] && p.y === where[i][1] && p.frozen));
+    room.brains.set(sk.id, brain);
+    for (let i = 0; i < 2 * 60; i++) room.tick();
+    check("after the hiding time they can", state.phase === "seek" && seekers.every((p) => !p.frozen));
+    const team1 = seekers[0].team;
+    for (let i = 0; i < 7 * 60; i++) room.tick();
+    check("when the clock runs out with a prop standing, the hiders win the round", state.phase === "end" && state.winner !== team1 && state.teamScore[3 - team1] === 1);
+    for (let i = 0; i < ROUND.end * 60 + 5; i++) room.tick();
+    check("then the sides swap", state.round === 2 && state.players.filter((p) => p.team === team1).every((p) => p.role === ROLE.hider));
+    for (let r = 0; r < 3; r++) for (let i = 0; i < (2 + 6 + ROUND.end) * 60 + 30; i++) room.tick();
+    check("after four rounds the match is over", state.phase === "over" && state.round === 4, "phase " + state.phase + ", round " + state.round + ", rounds won " + state.teamScore.slice(1).join(":"));
+    for (let i = 0; i < ROUND.over * 60 + 5; i++) room.tick();
+    check("and a new one starts", room.state !== state && room.state.round === 1);
+}
+{
+    // taunts: forced on the clock, voluntary ones score more the nearer a seeker is
+    const { state, h, s } = duel();
+    put(h, 0, -6); put(s, -3, -6);
+    h.tauntIn = 5;
+    const quiet = () => new Map([[1, input({ seq: ++h.seq })], [2, input({ seq: ++s.seq })]]);
+    const ev = []; for (let i = 0; i < 6; i++) { run(state, quiet()); ev.push(...state.events); }
+    const forced = ev.find((e) => e.type === "taunt");
+    check("a hider who hasn't taunted is made to", forced && forced.forced === 1 && h.tauntIn > 40 * TICK_RATE);
+    run(state, new Map([[1, input({ seq: ++h.seq, buttons: BTN.taunt })], [2, input({ seq: ++s.seq })]]));
+    const brave = state.events.find((e) => e.type === "taunt");
+    check("a taunt 3 m from a seeker scores", brave && !brave.forced && brave.points === Math.round(TAUNT.points + TAUNT.bravery * (1 - 3 / TAUNT.near)), "points " + (brave && brave.points));
+    check("and resets the clock", h.tauntIn === TAUNT.interval * TICK_RATE);
+    run(state, new Map([[1, input({ seq: ++h.seq })], [2, input({ seq: ++s.seq })]]));
+    run(state, new Map([[1, input({ seq: ++h.seq, buttons: BTN.taunt })], [2, input({ seq: ++s.seq })]]));
+    check("but not again straight away", !state.events.some((e) => e.type === "taunt"));
+}
+{
+    const { state, h, s } = duel();
+    put(h, -2, -4); put(s, 12, 8);
+    run(state, new Map([[1, input({ seq: ++h.seq, buttons: BTN.ability, yaw: quantizeYaw(0) })], [2, input({ seq: ++s.seq })]]));
+    check("a decoy appears", state.decoys.length === 1 && state.decoys[0].type === h.prop);
+    run(state, new Map([[1, input({ seq: ++h.seq })], [2, input({ seq: ++s.seq })]]), 90);
+    const d = state.decoys[0];
+    check("runs about " + DECOY.distance + " m and stops", Math.abs(d.x - -2 - DECOY.distance) < 0.05 && d.left <= 0, "at x " + d.x.toFixed(2));
+    run(state, new Map([[1, input({ seq: ++h.seq, buttons: BTN.ability })], [2, input({ seq: ++s.seq })]]));
+    check("only one per round", state.decoys.length === 1 && h.decoys === 0);
+    put(s, d.x - 4, d.y);
+    const at = aimAt(s, d.x, d.y, 0.2);
+    run(state, new Map([[1, input({ seq: ++h.seq })], [2, input({ seq: ++s.seq, buttons: BTN.fire, ...at })]]));
+    check("scanning it pops it and costs the seeker", state.decoys.length === 0 && s.health === 100 - SCANNER.penalty);
+}
+
 // ------------------------------------------------------------------ client and server agree
 console.log("prediction");
 {
