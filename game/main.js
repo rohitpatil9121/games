@@ -490,10 +490,12 @@ const orbit = { distance: 3, eye: [0, 0, 0] };
 const eye = { z: 0 }, at = { x: 0, y: 0, z: 0 }, last = { x: 0, y: 0 };
 let since = 1;
 game.onRender((frameDelta, alpha) => {
-    if (!client.transport) {
+    // the title's slow turn round the map, also while a connection is still being made
+    if (!client.transport || !client.map) {
         const b = world.map ? world.map.bounds : { min: [0, 0, 0], max: [0, 0, 0] };
         camera.target.set([(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, 1.5]); camera.distance = Math.max(14, (b.max[0] - b.min[0]) * 0.55); camera.pitch = 0.42;
         if (!reducedMotion()) camera.yaw += frameDelta * 0.05;
+        if (client.transport) client.frame(frameDelta);
         world.update(client, frameDelta);
         return;
     }
