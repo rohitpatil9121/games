@@ -145,3 +145,15 @@ bot's idol loose, feed line "Rohit-B shoved Cutter from behind"; results "Coral 
 then a new island. Online in two tabs (room WRWP): Bravo walked across the island and shoved Alpha;
 both feeds showed it, Alpha's client was moved 3.3 m by the knockback through reconciliation, Bravo's
 prediction error stayed 0.000 m.
+
+## Stage 6: bots (in progress, not finished)
+
+`game/bots.js`: utility AI (loot / home / steal / defend / rest, response curves, hysteresis), greed per
+bot, skill changes reaction time and how well it judges the flood. Movement walks a nav travel field.
+`tools/bot-match.mjs` runs whole matches through the real Room. First run, 2 matches, 4 teams of 2:
+bots bank 590-1720 per team, 93 shoves, 50 steals, 0.96 ms average tick (79 ms worst: travel fields).
+
+Not done yet: the flood never caught a bot (0 lost to the sea), so greed isn't biting; greedy bots bank
+*less*; camps 2 and 3 banked less in both matches (needs more matches to tell bad luck from unfairness);
+the 79 ms worst tick needs fields spread over ticks. Then stages 7 (looks), 8 (audio, HUD polish),
+9 (net-test at 150 ms, settings, rebinding, touch, README, THIRD_PARTY, QA report).
