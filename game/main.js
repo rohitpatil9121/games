@@ -1,7 +1,8 @@
 import { Game, Camera, PostFX } from "../engine/index.js";
 import { TIDE, LOOT, LOOT_KINDS, WATER, TICK_RATE, MOVE } from "./data.js";
 import { quantizeYaw, quantizePitch } from "./det.js";
-import { generateIsland, groundAt } from "./island.js";
+import { groundAt } from "./island.js";
+import { fairIsland } from "./fairness.js";
 import { createState, addPlayer, step, reachableLoot } from "./sim.js";
 import { tideAt, matchLeft } from "./tide.js";
 import { World } from "./world.js";
@@ -32,8 +33,9 @@ const prev = { x: 0, y: 0, z: 0 };
 const inputs = new Map();
 let seq = 0;
 
+const query = new URLSearchParams(location.search);
 function newMatch(seed) {
-    island = generateIsland(seed, 4);
+    island = fairIsland(seed, Number(query.get("teams")) || 4).island;
     state = createState(island);
     me = addPlayer(state, island, 1, "You", { team: 0 });
     world.loadIsland(island);
@@ -68,7 +70,9 @@ const tide = {};
 let hudNote = "", since = 1;
 const carriers = new Map();
 
+let overview = false;
 function thirdPerson(alpha, dt) {
+    if (overview) { camera.mode = "orbit"; camera.target.set([0, 0, 0]); camera.distance = 230; camera.pitch = 1.0; camera.yaw = -Math.PI / 2; return; }
     at.x = prev.x + (me.x - prev.x) * alpha; at.y = prev.y + (me.y - prev.y) * alpha; at.z = prev.z + (me.z - prev.z) * alpha;
     const yaw = view.yaw, pitch = view.pitch;
     // over the right shoulder: the target sits a little to the right of the head
@@ -106,7 +110,7 @@ game.onRender((frameDelta, alpha) => {
     const under = camera.eye[2] < tide.level;
     const s = game.scene;
     if (under) { s.fogColor.set([0.05, 0.25, 0.32]); s.fogDensity = 0.09; }
-    else { s.fogColor.set([0.6, 0.74, 0.86]); s.fogDensity = 0.004; }
+    else { s.fogColor.set([0.6, 0.74, 0.86]); s.fogDensity = overview ? 0.0007 : 0.004; }
 
     // HUD
     const phase = TIDE.phases[tide.phase];
@@ -126,9 +130,11 @@ game.onRender((frameDelta, alpha) => {
     }
 });
 
-newMatch((Date.now() & 0xffffff) + 1);
+newMatch(Number(query.get("seed")) || (Date.now() & 0xffffff) + 1);
 game.start();
 
 /** console hook */
 window.tidefall = { game, world, controls, view, get state() { return state; }, get island() { return island; }, get me() { return me; }, newMatch, play,
-    debug: () => { play(); return "ok"; } };
+    debug: () => { play(); return "ok"; },
+    /** look down on the whole island from above, at a tick (for checking the generator by eye) */
+    overview(tick = 0) { state.tick = tick; overview = true; $("title").hidden = true; return island.seed; } };

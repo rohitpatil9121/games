@@ -113,7 +113,7 @@ export function generateIsland(seed, teams = 4) {
         if (ring.wreck) {
             for (let i = 0; i < teams; i++) {
                 const angle = a0 + (i + 0.5) * sector, [x, y] = at(angle, ring.r), z = profileAt(ring.r);
-                ruins.push({ kind: "wreck", ring: ringIndex, tier: ring.tier, x, y, z, layout: WRECK, sector: i });
+                ruins.push({ kind: "wreck", ring: ringIndex, tier: ring.tier, x, y, z, angle, layout: WRECK, sector: i });
                 pads.push({ x, y, z, r: 9, blend: 7 });
             }
             return;
@@ -124,7 +124,7 @@ export function generateIsland(seed, teams = 4) {
             offsets.forEach((off, j) => {
                 const angle = a0 + i * sector + off, [x, y] = at(angle, ring.r), z = profileAt(ring.r);
                 const kind = RING_KINDS[ringIndex][j % RING_KINDS[ringIndex].length];
-                ruins.push({ kind, ring: ringIndex, tier: ring.tier, x, y, z, layout: LAYOUTS[kind], sector: i });
+                ruins.push({ kind, ring: ringIndex, tier: ring.tier, x, y, z, angle, layout: LAYOUTS[kind], sector: i });
                 pads.push({ x, y, z, r: 6.5, blend: 6 });
             });
         }
@@ -132,10 +132,10 @@ export function generateIsland(seed, teams = 4) {
 
     // rocks that stay dry at high water: somewhere to wait out the flood, and to grapple to
     const rocks = [];
-    const rockOffsets = [0.3 + rand() * 0.1, 0.62 + rand() * 0.1];
+    // (one on each camp's own line out to sea, one halfway between camps: clear of the ruins at a quarter and three quarters)
     for (let i = 0; i < teams; i++) {
-        for (const off of rockOffsets) {
-            const angle = a0 + (i + off) * sector, r = 70 + (off > 0.5 ? 6 : 0), [x, y] = at(angle, r);
+        for (const [off, r] of [[0.04 + rand() * 0.02, 66 + rand() * 3], [0.5, 71]]) {
+            const angle = a0 + (i + off) * sector, [x, y] = at(angle, r);
             rocks.push({ x, y, z: TIDE.high + 1.6, r: 3.2 });
         }
     }
@@ -143,12 +143,18 @@ export function generateIsland(seed, teams = 4) {
     // ---------------------------------------------------------------- the heightmap
     const heights = new Float64Array(n * n);
     const noiseSeed = (seed * 31 + 7) >>> 0;
+    // the noise repeats exactly in every sector: the angle is multiplied by the number of teams before
+    // sampling, by raising the point's direction (as a complex number) to that power, which needs no atan2
+    const turnR = dcos(-a0 * teams), turnI = dsin(-a0 * teams);
     for (let j = 0; j < n; j++) {
         const y = -half + j * cell;
         for (let i = 0; i < n; i++) {
             const x = -half + i * cell, r = Math.sqrt(x * x + y * y);
             let h = profileAt(r);
-            const noise = valueNoise(noiseSeed, x, y, 26) * 0.7 + valueNoise(noiseSeed + 1, x, y, 9) * 0.3;
+            let cr = 1, ci = 0;
+            if (r > 1e-9) { const ur = x / r, ui = y / r; for (let k = 0; k < teams; k++) { const t = cr * ur - ci * ui; ci = cr * ui + ci * ur; cr = t; } }
+            const sr = cr * turnR - ci * turnI, si = cr * turnI + ci * turnR, nx = sr * r, ny = si * r;
+            const noise = valueNoise(noiseSeed, nx, ny, 26) * 0.7 + valueNoise(noiseSeed + 1, nx, ny, 9) * 0.3;
             // the sea floor is gentler than the land; flatten noise near pads
             let calm = 1;
             for (const p of pads) {
@@ -176,11 +182,15 @@ export function generateIsland(seed, teams = 4) {
     const solids = [], spots = [];
     for (const ruin of ruins) {
         ruin.solids = [];
-        for (const b of ruin.layout.boxes) {
+        // each ruin faces the centre the same way, to the nearest quarter turn (boxes stay axis-aligned)
+        const q = ((Math.round(ruin.angle / HALF_TURN) % 4) + 4) % 4;
+        ruin.turn = q;
+        for (const b0 of ruin.layout.boxes) {
+            const b = turnBox(b0, q);
             const s = { x0: ruin.x + b[0], y0: ruin.y + b[1], z0: ruin.z + b[2] - (b[2] === 0 ? 0.4 : 0), x1: ruin.x + b[3], y1: ruin.y + b[4], z1: ruin.z + b[5], mat: b[6], stamp: 0 };
             solids.push(s); ruin.solids.push(s);
         }
-        for (const sp of ruin.layout.spots) spots.push({ x: ruin.x + sp[0], y: ruin.y + sp[1], z: ruin.z + (sp[2] || 0), tier: ruin.tier, ruin: ruins.indexOf(ruin) });
+        for (const sp0 of ruin.layout.spots) { const sp = turnPoint(sp0, q); spots.push({ x: ruin.x + sp[0], y: ruin.y + sp[1], z: ruin.z + (sp0[2] || 0), tier: ruin.tier, ruin: ruins.indexOf(ruin) }); }
     }
     // a few coins on the beach and the first shelf, so the first ebb has something close
     for (let i = 0; i < teams; i++) {
@@ -191,9 +201,24 @@ export function generateIsland(seed, teams = 4) {
     }
 
     const island = { seed, teams, size, cell, n, half, heights, camps, ruins, rocks, solids, spots, sector, a0, grid: null };
-    for (const s of spots) if (s.beach) s.z = groundAt(island, s.x, s.y);
     island.grid = buildGrid(solids, -half, -half, size, 8);
+    // every spot rests on whatever is under it: the terrain, or the top of a platform it sits on
+    for (const s of spots) {
+        let z = groundAt(island, s.x, s.y);
+        for (const b of solids) if (s.x > b.x0 && s.x < b.x1 && s.y > b.y0 && s.y < b.y1 && b.z1 <= s.z + 0.6 && b.z1 > z) z = b.z1;
+        s.z = z;
+    }
     return island;
+}
+
+const HALF_TURN = Math.PI / 2;
+/** A point [x, y] turned q quarter turns anticlockwise. */
+function turnPoint(p, q) { let x = p[0], y = p[1]; for (let k = 0; k < q; k++) { const t = x; x = -y; y = t; } return [x, y]; }
+/** A box [x0, y0, z0, x1, y1, z1, mat] turned q quarter turns anticlockwise about its origin. */
+function turnBox(b, q) {
+    let x0 = b[0], y0 = b[1], x1 = b[3], y1 = b[4];
+    for (let k = 0; k < q; k++) { const nx0 = -y1, nx1 = -y0; y0 = x0; y1 = x1; x0 = nx0; x1 = nx1; }
+    return [x0, y0, b[2], x1, y1, b[5], b[6]];
 }
 
 /** Bucket boxes into a coarse grid of ground cells, so collision only looks at the ones nearby. */

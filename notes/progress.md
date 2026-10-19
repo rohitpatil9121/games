@@ -44,3 +44,26 @@ Honest verdict: the loop has the tension it should (the flood is fast at the sta
 real gamble with an idol, and the shallow ring is safe and cheap). Two risks seen: swimming out during the
 ebb is slow (2.5 m/s over 30+ m), which may feel like dead time; and I can't judge the feel of the
 controls myself, only the numbers. Kept.
+
+## Stage 2: seeded island (`procedural-gen`, `level-design`)
+
+- `procedural-gen`: one seeded generator threaded through generation (`makeRandom`), value noise with two
+  octaves, a weighted loot table per depth tier (`LOOT_TABLE`, `rollLoot`), and validation before a map is
+  handed to players: `game/fairness.js` checks an island and `fairIsland()` skips to the next seed if one
+  fails. The room will send only the seed that passed.
+- `level-design`: metrics first (jump 1.31 m, mantle 1.45 m, so the stepped ruin's 1.05 m tiers are a
+  climb and the arch's 5.5 m top needs the grapple); the critical path is camp, beach, ring, back; fairness
+  by sectors.
+- Fairness, the hard part. First run of the checker: 10 of 18 islands failed, with up to 25% difference
+  between camps. Two causes: noise made one camp's slope to the sea longer, and the 8-neighbour path grid
+  itself measured diagonal directions 8% long. Fixes: the noise is sampled with the angle multiplied by
+  the team count (the point's direction raised to that power as a complex number, so no atan2), which
+  makes the terrain repeat exactly in every sector; ruins turn to face the centre by quarter turns; the
+  path grid uses 16 directions (under 3% error); rocks moved off the ruin lines. Now 56 of 60 pass as
+  generated (all 2- and 4-team islands), the 4 three-team failures pass on the next seed, worst spread
+  played 11.4% against a 12% tolerance. Three teams can't be exact, because a square grid and
+  axis-aligned ruin boxes don't turn by 120°.
+- Change from the brief: the shipwreck is broken into one piece between each pair of neighbouring camps.
+  A single wreck can't be the same distance from four camps.
+- `nav.js` (Dijkstra fields over the heightmap nodes, speed by water depth) started at 35 s for one check
+  because a float32 distance field kept re-relaxing nodes; doubles fixed it: 4 ms per field.
