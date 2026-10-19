@@ -417,7 +417,8 @@ export function stepPlayer(map, p, input) {
     p.pitch = Math.max(-32000, Math.min(32000, input.pitch | 0));
     p.fired = false; p.wantPing = false; p.wantDecoy = false; p.wantTaunt = false; p.disguised = false;
     if (!p.alive || p.frozen) { p.buttons = buttons; return; }
-    const hider = p.role === ROLE.hider;
+    // (a player not yet placed in a round has no prop: it moves as a body and does nothing else)
+    const hider = p.role === ROLE.hider && p.prop >= 0;
 
     if (hider) stepProp(map, p, input, pressed);
     gather(map, p.x, p.y, reachOf(p));
@@ -490,7 +491,7 @@ export function stepPlayer(map, p, input) {
     if (hider) {
         if (pressed & BTN.ability && p.decoys > 0) { p.decoys--; p.wantDecoy = true; }
         if (pressed & BTN.taunt && p.tauntCool === 0) { p.tauntCool = TAUNT.cooldown * TICK_RATE; p.wantTaunt = true; }
-    } else {
+    } else if (p.role === ROLE.seeker) {
         stepTrigger(p, input);
         if (pressed & BTN.ability && p.pings > 0) { p.pings--; p.wantPing = true; }
     }

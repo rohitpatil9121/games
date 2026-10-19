@@ -61,3 +61,12 @@ export const PROP_INDEX = Object.freeze(Object.fromEntries(PROP_LIST.map((p, i) 
 /** hit-box half sizes per type: [half width, half depth, height] */
 export const PROP_SHAPE = PROP_LIST.map((p) => [p.size[0] / 2, p.size[1] / 2, p.size[2]]);
 export const propType = (id) => PROP_INDEX[id] ?? -1;
+
+/**
+ * The size rule: a prop's box, longest side first, must be no smaller than a mug's and no bigger than a
+ * small car's on each side (so a tall thin lantern stand passes: it would fit inside the car lying down).
+ */
+export function sizeAllowed(size) {
+    const s = [...size].sort((a, b) => b - a), lo = [...SMALLEST].sort((a, b) => b - a), hi = [...LARGEST].sort((a, b) => b - a);
+    return s.every((v, i) => v >= lo[i] - 1e-9 && v <= hi[i] + 1e-9);
+}
