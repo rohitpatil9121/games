@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "decoy",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server/server.mjs", "5195"],
+      "port": 5195
+    }
+  ]
+}
