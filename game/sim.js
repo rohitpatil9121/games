@@ -597,7 +597,8 @@ function flare(state, island, p) {
         if (dd > T.blindRadius) continue;
         const v = aimOf(q);
         if (dd > 0.5 && (v.x * ox + v.y * oy + v.z * oz2) / dd < 0.25) continue;
-        if (!clearLine(island, fx, fy, fz + 0.1, hx, hy, hz)) continue;
+        // a flare burns a little above where it lands, so a bump in the sand beside it doesn't hide it
+        if (!clearLine(island, fx, fy, fz + 0.5, hx, hy, hz)) continue;
         q.blind = Math.round(T.blind * TICK_RATE);
         state.events.push({ type: "blind", id: q.id, by: p.id });
     }

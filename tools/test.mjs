@@ -172,5 +172,106 @@ const island = generateIsland(4242, 4);
     check("the water never jumps between ticks", jump < 0.012, `largest step ${(jump * 100).toFixed(2)} cm`);
 }
 
+// ------------------------------------------------------------------ rivals: shove, flare, banking, scoring
+{
+    const setup = () => {
+        const state = createState(island);
+        const a = addPlayer(state, island, 1, "A", { team: 0 }), b = addPlayer(state, island, 2, "B", { team: 1 });
+        // somewhere flat and dry at high water: the plateau between two camps
+        const cx = (island.camps[0].x + island.camps[1].x) * 0.25, cy = (island.camps[0].y + island.camps[1].y) * 0.25;
+        for (const p of [a, b]) { p.x = cx; p.y = cy; p.z = groundAt(island, cx, cy); p.ground = true; }
+        const give = (p, kind, id) => { state.loot.push({ id, kind, x: p.x, y: p.y, z: p.z, vz: 0, holder: p.id, spot: -1, dropBy: 0 }); p.carry.push(id); p.weight += LOOT[["", "coin", "relic", "idol"][kind]].weight; };
+        state.lastPhase = 0; state.lastTide = 0;
+        return { state, a, b, give };
+    };
+    const run = (state, inputs, n) => { for (let t = 0; t < n; t++) step(state, island, new Map(inputs.map(([id, inp]) => [id, typeof inp === "function" ? inp(t) : inp]))); };
+
+    // a shove from in front: one item, a short stagger
+    {
+        const { state, a, b, give } = setup();
+        give(b, 2, 501); give(b, 1, 502);
+        b.x = a.x + 1.2; b.fx = -1; b.fy = 0;
+        step(state, island, new Map([[1, input({ seq: 1, yaw: quantizeYaw(0), buttons: BTN.shove })], [2, input({ seq: 1, yaw: quantizeYaw(Math.PI) })]]));
+        const e = state.events.find((x) => x.type === "shove");
+        check("a shove from in front knocks one item loose", e && e.target === 2 && !e.behind && b.carry.length === 1 && b.stun > 0, `carry ${b.carry.length}, stun ${b.stun} ticks`);
+    }
+    // from behind: two items, a longer stagger
+    {
+        const { state, a, b, give } = setup();
+        give(b, 2, 601); give(b, 1, 602); give(b, 1, 603);
+        b.x = a.x + 1.2; b.fx = 1; b.fy = 0;
+        step(state, island, new Map([[1, input({ seq: 1, yaw: quantizeYaw(0), buttons: BTN.shove })], [2, input({ seq: 1, yaw: quantizeYaw(0) })]]));
+        const e = state.events.find((x) => x.type === "shove");
+        check("a shove from behind knocks two items loose and staggers longer", e && e.behind === 1 && b.carry.length === 1 && b.stun >= 50, `carry ${b.carry.length}, stun ${b.stun} ticks`);
+        const loose = state.loot.find((l) => l.id === 603);
+        run(state, [[2, input({ seq: 2 })]], 60);
+        a.x = loose.x; a.y = loose.y; a.z = loose.z; a.vx = a.vy = 0;
+        run(state, [[1, (t) => input({ seq: 2 + t, buttons: t === 2 ? BTN.interact : 0 })], [2, input({ seq: 2 })]], 6);
+        check("...and picking up what a rival dropped counts as a steal", a.steals === 1 && a.carry.length === 1, `steals ${a.steals}`);
+    }
+    // no friendly shoves, no shoves out of reach
+    {
+        const { state, a, b, give } = setup();
+        b.team = 0; give(b, 1, 701); b.x = a.x + 1;
+        step(state, island, new Map([[1, input({ seq: 1, yaw: quantizeYaw(0), buttons: BTN.shove })]]));
+        check("you can't shove your own team", b.carry.length === 1);
+        b.team = 1; b.x = a.x + 3.5; a.shoveCool = 0;
+        step(state, island, new Map([[1, input({ seq: 2, yaw: quantizeYaw(0), buttons: BTN.shove })]]));
+        check("a shove doesn't reach 3.5 m", b.carry.length === 1);
+    }
+    // lag compensation: a shove aimed at where the target was a moment ago (as the shover saw it) lands
+    {
+        const { state, a, b, give } = setup();
+        give(b, 1, 801);
+        b.x = a.x + 1.0; b.y = a.y;
+        run(state, [[2, (t) => input({ seq: t + 1, mx: 127, yaw: quantizeYaw(0) })], [1, input({ seq: 1, yaw: quantizeYaw(0) })]], 30);
+        const gone = Math.hypot(b.x - a.x, b.y - a.y);
+        // the most recent moment, within the 200 ms cap, at which b was still within reach
+        let lag = 0, then = null;
+        for (let k = 1; k <= 12 && !then; k++) { const i = ((state.tick - k) & 31) * 3, d = Math.hypot(b.hist[i] - a.x, b.hist[i + 1] - a.y); if (d <= 1.9) { lag = k; then = { x: b.hist[i], y: b.hist[i + 1], d }; } }
+        const yaw = then ? quantizeYaw(Math.atan2(then.y - a.y, then.x - a.x)) : 0;
+        step(state, island, new Map([[1, { ...input({ seq: 2, yaw, buttons: BTN.shove }), lag }], [2, input({ seq: 31, yaw: quantizeYaw(0) })]]));
+        const hit = state.events.find((x) => x.type === "shove");
+        check("a lag-compensated shove lands on where the target was when the shover saw it", gone > 2.1 && then && hit && hit.target === 2, `target now ${gone.toFixed(2)} m away; ${lag} ticks (${Math.round(lag * 1000 / 60)} ms) ago it was ${then ? then.d.toFixed(2) : "?"} m`);
+        // and with the rewind off (lag 0) the same shove misses
+        const s2 = setup(); s2.give(s2.b, 1, 802); s2.b.x = s2.a.x + 1.0; s2.b.y = s2.a.y;
+        run(s2.state, [[2, (t) => input({ seq: t + 1, mx: 127, yaw: quantizeYaw(0) })], [1, input({ seq: 1, yaw: quantizeYaw(0) })]], 30);
+        step(s2.state, island, new Map([[1, { ...input({ seq: 2, yaw, buttons: BTN.shove }), lag: 0 }], [2, input({ seq: 31, yaw: quantizeYaw(0) })]]));
+        const miss = s2.state.events.find((x) => x.type === "shove");
+        check("...and the same shove without the rewind misses", miss && miss.target === 0);
+    }
+    // flare: a rival looking at it is dazzled; one looking away is not; teammates never
+    {
+        const { state, a, b } = setup();
+        b.x = a.x + 6; b.y = a.y;
+        const c = addPlayer(state, island, 3, "C", { team: 1 }); c.x = a.x + 6; c.y = a.y + 1; c.z = b.z;
+        const d = addPlayer(state, island, 4, "D", { team: 0 }); d.x = a.x + 6; d.y = a.y - 1; d.z = b.z;
+        const pitch = quantizePitch(Math.atan2(-1.45, 3));
+        // everyone turns first (b and d to look at a, c away), then a fires
+        step(state, island, new Map([[1, input({ seq: 1, yaw: quantizeYaw(0), pitch })], [2, input({ seq: 1, yaw: quantizeYaw(Math.PI) })], [3, input({ seq: 1, yaw: quantizeYaw(0) })], [4, input({ seq: 1, yaw: quantizeYaw(Math.PI) })]]));
+        step(state, island, new Map([[1, input({ seq: 1, yaw: quantizeYaw(0), pitch, buttons: BTN.flare })], [2, input({ seq: 1, yaw: quantizeYaw(Math.PI) })], [3, input({ seq: 1, yaw: quantizeYaw(0) })], [4, input({ seq: 1, yaw: quantizeYaw(Math.PI) })]]));
+        check("a flare dazzles a rival who is looking at it", b.blind > 0, `${b.blind} ticks`);
+        check("...but not one looking away, nor a teammate", c.blind === 0 && d.blind === 0);
+        check("...and marks the spot for the team", state.flares.length === 1 && state.flares[0].team === 0);
+    }
+    // banking: only at your own camp; the match ends after six tides with the richest team winning
+    {
+        const { state, a, give } = setup();
+        give(a, 3, 901);
+        const other = island.camps[1];
+        a.x = other.x; a.y = other.y; a.z = other.z;
+        step(state, island, new Map([[1, input({ seq: 1 })]]));
+        check("loot isn't banked at a rival's camp", a.carry.length === 1 && state.bank[1] === 0);
+        const mine = island.camps[0];
+        a.x = mine.x + 1; a.y = mine.y; a.z = mine.z;
+        step(state, island, new Map([[1, input({ seq: 2 })]]));
+        check("it is banked at your own", a.carry.length === 0 && state.bank[0] === LOOT.idol.value, `team 0 bank ${state.bank[0]}`);
+        state.tick = 6 * 90 * TICK_RATE - 2;
+        let over = null;
+        for (let t = 0; t < 4; t++) { step(state, island, new Map()); for (const e of state.events) if (e.type === "over") over = e; }
+        check("after six tides the match ends and the richest team wins", over && over.winner === 0 && state.phase === "over");
+    }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -50,13 +50,31 @@
 </section>
 
 <div id="hud" hidden>
-  <div id="tide-clock"></div>
-  <div id="carry"></div>
-  <div id="bank"></div>
-  <div id="breath"><i></i></div>
-  <div id="prompt"></div>
-  <div id="notice"></div>
+  <div id="markers" aria-hidden="true"></div>
+  <div id="blind" aria-hidden="true"></div>
+  <div id="flood-warn" aria-hidden="true"></div>
+  <header id="tide" aria-label="Tide">
+    <div id="tide-pips" aria-hidden="true"></div>
+    <div id="tide-line"><span id="tide-phase"></span> <span id="tide-time"></span></div>
+    <div id="tide-track"><div id="tide-bar"></div><b id="tide-mark"></b></div>
+    <div id="tide-trend"></div>
+  </header>
+  <ol id="banks" aria-label="Banked by each team"></ol>
+  <ol id="feed" aria-live="polite"></ol>
   <div id="crosshair"></div>
+  <div id="prompt" role="status"></div>
+  <div id="notice" role="status"></div>
+  <div id="breath" aria-label="Breath"><i id="breath-fill"></i></div>
+  <div id="compass"><b id="compass-arrow">&#9650;</b> <span id="compass-text"></span></div>
+  <section id="carry" aria-label="What you carry">
+    <div id="carry-items"></div>
+    <div id="carry-bar"><i id="carry-fill"></i></div>
+    <div id="carry-label"></div>
+  </section>
+  <section id="scores" aria-label="Scores">
+    <h2 id="scores-title"></h2><p id="scores-sub"></p>
+    <table><thead><tr><th>Player</th><th></th><th>Banked</th><th>Lost to sea</th><th>Steals</th><th>Shoves</th><th>Ping</th></tr></thead><tbody id="scores-body"></tbody></table>
+  </section>
   <pre id="debug" hidden></pre>
 </div>
 <script type="module" src="game/main.js"></script>

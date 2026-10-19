@@ -39,14 +39,22 @@ export class World {
         const loot = this.scene.add(new Entity({ name: "loot", mesh: this.lootMesh, frustumCulled: false }));
         loot.interpolate = false;
         this._bodyGeometry = primitives.capsule(0.35, 1.1, 6, 12);
-        // the grapple's rope: one line, rewritten each frame
-        this.ropeGeometry = new Geometry({ name: "rope", mode: "lines", dynamic: true, positions: new Float32Array(6), colors: new Float32Array([0.9, 0.85, 0.7, 1, 0.9, 0.85, 0.7, 1]) });
-        this.ropeEntity = this.scene.add(new Entity({ name: "rope", castShadow: false, frustumCulled: false, visible: false,
+        // grapple ropes: one line mesh for all of them, rewritten each frame
+        this.ropeGeometry = new Geometry({ name: "ropes", mode: "lines", dynamic: true, positions: new Float32Array(8 * 6), colors: new Float32Array(8 * 8).fill(1) });
+        for (let i = 0; i < 16; i++) this.ropeGeometry.colors.set([0.92, 0.86, 0.7, 1], i * 4);
+        this.ropeGeometry.drawCount = 0;
+        this.ropeEntity = this.scene.add(new Entity({ name: "ropes", castShadow: false, frustumCulled: false,
             mesh: new Mesh(this.ropeGeometry, new BasicMaterial({ lit: false, vertexColors: true })) }));
         this.ropeEntity.interpolate = false;
+        this.ropeCount = 0;
+        /** burning flares: { entity, light, ttl, color } */
+        this.flares = [];
+        this._flareGeometry = primitives.sphere(0.22, 12, 8);
         const particles = (options) => { const p = this.scene.add(new ParticleSystem(options)); p.castShadow = false; p.frustumCulled = false; return p; };
         this.spray = particles({ capacity: 900, gravity: [0, 0, -9], drag: 1.2, blending: "normal", name: "spray" });
         this.sparkle = particles({ capacity: 400, gravity: [0, 0, 1.5], drag: 2, name: "sparkle" });
+        this.dust = particles({ capacity: 300, gravity: [0, 0, 0.6], drag: 3, blending: "normal", name: "dust" });
+        this.embers = particles({ capacity: 600, gravity: [0, 0, 2.5], drag: 1.5, name: "embers" });
         this._noseGeometry = primitives.box(0.18, 0.5, 0.18);
         /** where each drawn player is this frame, for hanging their loot on them: id → { x, y, z, fx, fy, face } */
         this.carriers = new Map();
@@ -58,6 +66,8 @@ export class World {
         for (const id of [...this.players.keys()]) this.removePlayer(id);
         this.island = island;
         const root = (this.root = this.scene.add(new Entity({ name: "island" })));
+        this.scene.pointLights.length = 0;
+        this.flares.length = 0;
         const scene = this.scene;
         scene.clearColor.set([0.55, 0.72, 0.86, 1]);
         const sun = [0.45, -0.35, 0.82], l = Math.hypot(...sun);
@@ -192,12 +202,30 @@ export class World {
         m.count = n;
     }
 
-    /** Show the grapple's rope from a hand to the hook, or hide it. */
-    rope(on, ax, ay, az, bx, by, bz) {
-        this.ropeEntity.visible = on;
-        if (!on) return;
-        this.ropeGeometry.positions.set([ax, ay, az, bx, by, bz]);
-        this.ropeGeometry.markDirty();
+    /** Start this frame's ropes; then rope() for each, then endRopes(). */
+    beginRopes() { this.ropeCount = 0; }
+    rope(ax, ay, az, bx, by, bz) {
+        if (this.ropeCount >= 8) return;
+        this.ropeGeometry.positions.set([ax, ay, az, bx, by, bz], this.ropeCount * 6);
+        this.ropeCount++;
+    }
+    endRopes() { this.ropeGeometry.drawCount = this.ropeCount * 2; this.ropeGeometry.markDirty(); }
+
+    /** A burning flare: a bright ball, a light, embers rising, for `seconds`. */
+    flare(x, y, z, color, seconds) {
+        const c = color.map((v) => v * 4);
+        const entity = this.root.add(new Entity({ name: "flare", castShadow: false, mesh: new Mesh(this._flareGeometry, new StandardMaterial({ color, emissive: c })) }));
+        entity.setPosition(x, y, z + 0.5);
+        const light = { position: [x, y, z + 1.2], color: color.map((v) => v * 3.5), radius: 16 };
+        this.scene.pointLights.push(light);
+        this.flares.push({ entity, light, ttl: seconds, max: seconds, color, x, y, z: z + 0.5 });
+        this.sparkle.emit(60, { position: [x, y, z + 0.5], speed: 6, life: [0.3, 0.9], size: [0.25, 0], color: [c[0], c[1], c[2], 1] });
+    }
+
+    /** A shove landing: a puff of sand (or spray in water) and a ring of dust. */
+    puff(x, y, z, wet) {
+        if (wet) { this.splash(x, y, z, 0.8); return; }
+        this.dust.emit(26, { position: [x, y, z + 0.9], spread: 0.3, speed: 2.6, life: [0.3, 0.7], size: [0.35, 0.1], color: [0.85, 0.78, 0.6, 0.7], colorEnd: [0.85, 0.78, 0.6, 0] });
     }
 
     /** Water thrown up where something hits the surface. */
@@ -213,7 +241,23 @@ export class World {
     /** Move the sea to the water level. */
     setWater(level) { if (this.sea) { this.sea.setPosition(0, 0, level); this.sea.teleport(); } }
 
-    update(dt) { this.time += dt; }
+    update(dt) {
+        this.time += dt;
+        for (let i = this.flares.length - 1; i >= 0; i--) {
+            const f = this.flares[i];
+            f.ttl -= dt;
+            // a flicker, and a fade over the last second
+            const k = Math.max(0, Math.min(1, f.ttl)) * (0.85 + 0.15 * Math.sin(this.time * 31 + i));
+            for (let j = 0; j < 3; j++) f.light.color[j] = f.color[j] * 3.5 * k;
+            if (Math.random() < dt * 30) this.embers.emit(1, { position: [f.x, f.y, f.z], spread: 0.1, velocity: [0, 0, 1.2], speed: 0.6, life: [0.5, 1.1], size: [0.12, 0], color: [f.color[0] * 3, f.color[1] * 3, f.color[2] * 3, 1] });
+            if (f.ttl <= 0) {
+                this.root.remove(f.entity);
+                const at = this.scene.pointLights.indexOf(f.light);
+                if (at >= 0) this.scene.pointLights.splice(at, 1);
+                this.flares.splice(i, 1);
+            }
+        }
+    }
 }
 
 export { LOOT_KINDS };

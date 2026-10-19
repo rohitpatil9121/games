@@ -1,5 +1,5 @@
 import { Game, Camera, PostFX } from "../engine/index.js";
-import { TIDE, LOOT, LOOT_KINDS, WATER, TICK_RATE, BTN, MATCH, TEAM_NAMES, teamColor, cssColor } from "./data.js";
+import { LOOT, LOOT_KINDS, TICK_RATE, BTN, MATCH, TOOLS, TEAM_NAMES, teamColor } from "./data.js";
 import { quantizeYaw, quantizePitch } from "./det.js";
 import { reachableLoot } from "./sim.js";
 import { tideAt, matchLeft } from "./tide.js";
@@ -8,6 +8,8 @@ import { PROTOCOL, NAME_MAX, cleanText } from "./protocol.js";
 import { World } from "./world.js";
 import { Controls, defaultBindings } from "./controls.js";
 import { ThirdPerson } from "./camera.js";
+import { Hud } from "./hud.js";
+import { FLAG } from "./protocol.js";
 import { Room } from "../server/room.mjs";
 
 /**
@@ -41,6 +43,7 @@ const client = new Client();
 const controls = new Controls(input, canvas, settings);
 const view = controls.view;
 const rig = new ThirdPerson(camera);
+const hud = new Hud(client);
 
 // ------------------------------------------------------------------ screens
 let screen = "title";
@@ -153,6 +156,7 @@ let lockLost = 0;
 document.addEventListener("pointerlockchange", () => { if (!document.pointerLockElement && screen === "play") { lockLost = performance.now(); show("pause"); } });
 addEventListener("keydown", (e) => {
     if (e.code === "F3") { e.preventDefault(); $("debug").hidden = !$("debug").hidden; }
+    else if (e.code === "Tab" && screen === "play") e.preventDefault();
     else if (e.code === "Escape" && performance.now() - lockLost > 400) {
         if (screen === "play" && !document.pointerLockElement) show("pause");
         else if (screen === "pause") resume();
@@ -160,8 +164,7 @@ addEventListener("keydown", (e) => {
 });
 
 // ------------------------------------------------------------------ what the match tells us
-let noticeText = "", noticeLeft = 0;
-function notice(text, seconds = 3) { noticeText = text; noticeLeft = seconds; }
+function notice(text, seconds = 3) { hud.notice(text, seconds); }
 
 client.on("welcome", () => {
     world.loadIsland(client.island);
@@ -174,7 +177,7 @@ client.on("welcome", () => {
     const camp = client.island.camps[client.me.team] || client.island.camps[0];
     view.yaw = camp.angle; view.pitch = -0.2;
 });
-client.on("start", () => { world.loadIsland(client.island); notice("A new island", 3); });
+client.on("start", () => { world.loadIsland(client.island); flares.length = 0; notice("A new island", 3); });
 client.on("close", (reason) => {
     const was = client.room && client.room.code !== "PRACTICE" ? client.room.code : online.last && online.last.room;
     toTitle();
@@ -184,14 +187,68 @@ client.on("close", (reason) => {
 client.on("event", onEvent);
 client.on("predicted", () => { /* sounds for my own jump and grapple, at once (stage 8) */ });
 
+/** flares burning, as this client was told: { id, team, x, y, z, until } */
+const flares = [];
+let flareIds = 0;
+const spot = { x: 0, y: 0, z: 0 };
+/** Where a player is right now, as far as this client knows. */
+function whereIs(id, out) {
+    if (id === client.id) { out.x = client.me.x; out.y = client.me.y; out.z = client.me.z; return true; }
+    const snap = client.snaps[client.snaps.length - 1], row = snap && snap.players.get(id);
+    if (!row) return false;
+    out.x = row[1]; out.y = row[2]; out.z = row[3];
+    return true;
+}
+const kindName = (k) => LOOT[LOOT_KINDS[k]] ? LOOT[LOOT_KINDS[k]].name.toLowerCase() : "loot";
+
 function onEvent(e) {
-    const me = client.me;
-    if (e.type === "over") notice(e.winner < 0 ? "A draw" : `${TEAM_NAMES[e.winner]} wins`, 8);
-    else if (e.type === "phase") { if (e.phase === 2) notice("The flood is coming", 3); else if (e.phase === 0) notice(`Tide ${e.tide + 1}: the sea goes out`, 3); }
-    else if (e.type === "pick" && e.id === me.id) world.glint(me.x, me.y, me.z + 1, [1, 0.85, 0.4]);
-    else if (e.type === "bank") { const c = client.island.camps[e.team]; world.glint(c.x, c.y, c.z + 1, [1, 0.9, 0.5], 60); if (e.id === me.id) { game.juice.shake(0.12); notice(`Banked ${e.value}`, 2); } }
-    else if (e.type === "drop" && e.why === "gasp" && e.id === me.id) { game.juice.shake(0.25); notice("Out of breath: you let go of the heavy loot", 3); }
-    else if (e.type === "drown" && e.id === me.id) notice("Drowned", 3);
+    const me = client.me, island = client.island, mine = e.id === me.id;
+    const team = (id) => client.players.get(id)?.team ?? -1;
+    switch (e.type) {
+        case "over":
+            notice(e.winner < 0 ? "A draw" : e.winner === me.team ? "Your team wins" : `${TEAM_NAMES[e.winner]} wins`, 6);
+            break;
+        case "phase":
+            if (e.phase === 0) notice(`Tide ${e.tide + 1} of 6: the sea goes out`, 3);
+            else if (e.phase === 1) notice("Low tide: everything is open", 2.5);
+            else if (e.phase === 2) notice("The flood is coming", 3);
+            else if (e.phase === 3) notice("High tide", 2);
+            break;
+        case "pick":
+            if (mine) world.glint(me.x, me.y, me.z + 1, [1, 0.85, 0.4]);
+            break;
+        case "bank": {
+            const c = island.camps[e.team];
+            world.glint(c.x, c.y, c.z + 1, teamColor(e.team), 60);
+            hud.feed(`${hud.who(e.id)} banked <b>${e.value}</b>`, e.team);
+            if (mine) { game.juice.shake(0.12); notice(`Banked ${e.value}`, 2); }
+            break;
+        }
+        case "drop":
+            if (e.why === "gasp") { if (mine) { game.juice.shake(0.25); notice("Out of breath: the heavy loot sinks", 3); } else hud.feed(`${hud.who(e.id)} lost loot to the sea`, team(e.id)); }
+            break;
+        case "drown":
+            if (mine) notice("Drowned. Back to camp", 3); else hud.feed(`${hud.who(e.id)} drowned`, team(e.id));
+            break;
+        case "shove":
+            if (!e.target) break;
+            if (whereIs(e.target, spot)) world.puff(spot.x, spot.y, spot.z, client.level(client.clock) > spot.z + 0.8);
+            if (e.target === me.id) { game.juice.shake(e.behind ? 0.55 : 0.35); notice(e.behind ? "Shoved from behind!" : "Shoved!", 1.5); }
+            if (mine) game.juice.shake(0.15);
+            hud.feed(`${hud.who(e.id)} shoved ${hud.who(e.target)}${e.behind ? " from behind" : ""}`, team(e.id));
+            break;
+        case "flare":
+            world.flare(e.x, e.y, e.z, teamColor(e.team), TOOLS.flare.mark);
+            flares.push({ id: ++flareIds, team: e.team, x: e.x, y: e.y, z: e.z, until: performance.now() + TOOLS.flare.mark * 1000 });
+            break;
+        case "blind":
+            if (e.id === me.id) game.juice.shake(0.2);
+            break;
+        case "hook":
+            if (!mine && !e.hit) break;
+            break;
+        default: break;
+    }
 }
 
 // ------------------------------------------------------------------ the fixed step
@@ -214,8 +271,6 @@ const at = { x: 0, y: 0, z: 0, vx: 0, vy: 0 }, tide = {}, fx = { fov: 0, wasWate
 let since = 1;
 
 game.onRender((dt, alpha) => {
-    if (noticeLeft > 0) noticeLeft -= dt;
-    $("notice").textContent = noticeLeft > 0 ? noticeText : "";
     // first, so held messages (the welcome among them) are let through even before there is an island
     if (client.transport) client.frame(dt);
     if (!client.transport || !client.island) {
@@ -239,35 +294,43 @@ game.onRender((dt, alpha) => {
     fx.wasWater = wet;
 
     world.drawPlayers(client, at);
-    world.rope(!!me.hook && me.alive, at.x, at.y, at.z + 1.3, me.hx, me.hy, me.hz);
-    world.drawLoot(client, at);
+    // ropes: mine from prediction, the others' from their snapshot rows
+    world.beginRopes();
+    if (me.hook && me.alive) world.rope(at.x, at.y, at.z + 1.3, me.hx, me.hy, me.hz);
+    for (const [id, c] of world.carriers) {
+        if (id === client.id) continue;
+        const s = sample;
+        if (client.sample(id, s) && (s.flags & FLAG.hook)) world.rope(c.x, c.y, c.z + 1.3, s.hx, s.hy, s.hz);
+    }
+    world.endRopes();
+    world.drawLoot(client);
     world.update(dt);
 
-    const s = game.scene, u = rig.under;
-    s.fogColor.set([0.6 + (0.05 - 0.6) * u, 0.74 + (0.25 - 0.74) * u, 0.86 + (0.32 - 0.86) * u]);
-    s.fogDensity = 0.004 + 0.085 * u;
-    if (me.alive) { const t = rig.aimAt(island, me); $("crosshair").classList.toggle("reach", t.reach && me.hookCool === 0); }
+    const sc = game.scene, u = rig.under;
+    sc.fogColor.set([0.6 + (0.05 - 0.6) * u, 0.74 + (0.25 - 0.74) * u, 0.86 + (0.32 - 0.86) * u]);
+    sc.fogDensity = 0.004 + 0.085 * u;
+    const aim = me.alive ? rig.aimAt(island, me) : null;
+    $("crosshair").classList.toggle("reach", !!aim && aim.reach && me.hookCool === 0);
 
-    // HUD (plain text until stage 8)
-    const phase = TIDE.phases[tide.phase];
-    $("tide-clock").textContent = client.match.phase === "over" ? "Match over" : `Tide ${tide.tide + 1} of ${TIDE.tides} · ${phase.name} ${Math.ceil(tide.phaseLeft / TICK_RATE)} s`;
-    const items = me.carry.map((id) => { const l = client.loot.get(id); return l ? LOOT[LOOT_KINDS[l.kind]].name : "?"; });
-    $("carry").textContent = `Carrying ${me.weight} kg${items.length ? ": " + items.join(", ") : ""}`;
-    $("bank").textContent = Array.from({ length: island.teams }, (_, t) => `${TEAM_NAMES[t]} ${client.match.bank[t]}${t === me.team ? "  ◀" : ""}`).join("\n");
-    $("bank").style.color = cssColor(teamColor(me.team));
-    $("breath").style.opacity = me.breath < WATER.breath * TICK_RATE ? 1 : 0;
-    $("breath").firstElementChild.style.width = (100 * me.breath) / (WATER.breath * TICK_RATE) + "%";
+    const now = performance.now();
+    for (let i = flares.length - 1; i >= 0; i--) if (flares[i].until < now) flares.splice(i, 1);
     const near = nearestLoot(me);
-    $("prompt").textContent = !me.alive ? `Drowned. Back at camp in ${Math.ceil(me.respawn / TICK_RATE)} s` : near ? `E: pick up ${LOOT[LOOT_KINDS[near.kind]].name} (${LOOT[LOOT_KINDS[near.kind]].weight} kg)` : "";
+    const prompt = !me.alive ? `Drowned. Back at camp in ${Math.ceil(me.respawn / TICK_RATE)} s`
+        : me.stun > 0 ? "" : near ? `${keyOf("interact")}: pick up ${LOOT[LOOT_KINDS[near.kind]].name} (${LOOT[LOOT_KINDS[near.kind]].weight} kg)` : "";
+    if ($("prompt").textContent !== prompt) $("prompt").textContent = prompt;
+    let debug;
     if (!$("debug").hidden && (since += dt) > 0.1) {
         since = 0;
         const st = renderer.stats, n = client.stats;
-        $("debug").textContent = `pos ${me.x.toFixed(1)} ${me.y.toFixed(1)} ${me.z.toFixed(2)}  speed ${Math.hypot(me.vx, me.vy).toFixed(1)}  ${["dry", "wading", "swimming", "sunk"][me.water]}`
+        debug = `pos ${me.x.toFixed(1)} ${me.y.toFixed(1)} ${me.z.toFixed(2)}  speed ${Math.hypot(me.vx, me.vy).toFixed(1)}  ${["dry", "wading", "swimming", "sunk"][me.water]}`
             + `\n${Math.round(game.loop.fps)} fps  ${game.loop.frameMs.toFixed(1)} ms  ${st.drawCalls} draws  ${(st.triangles / 1000).toFixed(0)}k tris`
             + `\nping ${client.ping} ms  in ${(n.bytesIn / 1000).toFixed(1)} kB/s  out ${(n.bytesOut / 1000).toFixed(1)} kB/s  ${n.snaps} snaps/s`
             + `\nreplayed ${n.replayed}  corrections ${n.corrections}  last error ${n.lastError.toFixed(3)} m   match left ${Math.ceil(matchLeft(client.clock))} s`;
     }
+    hud.update(dt, { camera, width: canvas.clientWidth, height: canvas.clientHeight, viewYaw: view.yaw, scores: controls.active && input.isDown("scores"), flares, debug });
 });
+const sample = {};
+const keyOf = (id) => (settings.bindings[id] || [])[0]?.replace(/^Key/, "") || id;
 
 /** The item the server would let me pick up, as far as this client knows. */
 const lootView = { loot: [] };

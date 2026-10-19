@@ -117,3 +117,31 @@ same island seed and were put on different teams. B walked 20 m; B's last reconc
 in the page. No console errors in either tab, none in the server log. Bug found on the way: the
 transport's held messages were only pumped once an island existed, and the island arrives in a held
 message; the pump now runs first.
+
+## Stage 5: rivals
+
+Rules (all in `sim.js`, decided by the authority; tested in `tools/test.mjs`, 26 tests now):
+- Shove: 2.1 m reach, a 63° cone, 1.2 s cooldown. From in front: one item knocked loose, 0.45 s stagger.
+  From behind (the target facing away from the shove): two items, 1 s stagger, 25% more knockback.
+  Never your own team. Lag-compensated like BREACH's shots, capped at 12 ticks (200 ms): the test shows
+  the same shove landing with the rewind and missing without it.
+- Picking up something a rival dropped by being shoved counts as a steal.
+- Flare: marks a spot for your team for 12 s; dazzles rivals within 9 m who are looking toward it and
+  can see it (white-out for 2.4 s). Line of sight is taken from 0.5 m above where it lands (a bump in the
+  sand next to a flare otherwise hid it).
+- Banking only at your own camp; after six tides the richest team wins; results stay up 14 s; then a new
+  island.
+
+Presentation: `game/hud.js` (the `game-ui-ux` / `threejs-game-ui-designer` hierarchy: survival, then the
+objective, then status, then feedback): tide pips and a four-colour cycle bar with a marker, seconds left,
+water rising/falling, banks sorted with yours marked, what you carry with a weight bar that marks the
+4 kg swimming limit, a compass arrow and distance to camp, breath, a red edge pulse when the flood comes
+and you're out with loot, a feed, world markers (your camp, your team's flares, teammates, anyone
+carrying an idol), the scoreboard on Tab and the results. World: flares are a light, a glowing ball and
+embers; ropes for every grappling player; a puff of sand (or spray) where a shove lands.
+
+Verified in the browser: Practice with bots: a flare and its marker; a shove from behind knocked a
+bot's idol loose, feed line "Rohit-B shoved Cutter from behind"; results "Coral wins, next island in 14 s",
+then a new island. Online in two tabs (room WRWP): Bravo walked across the island and shoved Alpha;
+both feeds showed it, Alpha's client was moved 3.3 m by the knockback through reconciliation, Bravo's
+prediction error stayed 0.000 m.
