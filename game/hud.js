@@ -158,7 +158,7 @@ export class Hud {
             b.textContent = `${m.teamScore[2]} ${TEAM_NAMES[2]}`; b.style.color = cssColor(colorOf({ team: 2 }));
             el.teams.replaceChildren(a, " : ", b);
         });
-        const roleText = !c.joined ? "" : !me.alive && playing ? "" : m.phase === "wait" ? "Waiting for the other side" : seeker ? "You are seeking" : "You are hiding";
+        const roleText = !c.joined || m.phase === "end" || m.phase === "over" ? "" : !me.alive && playing ? "" : m.phase === "wait" ? "Waiting for the other side" : seeker ? "You are seeking" : "You are hiding";
         this.set("role", roleText, (v) => { el.role.hidden = !v; el.role.textContent = v; });
         this.set("blind", seeker && me.frozen && m.phase === "hide", (v) => { el.blind.hidden = !v; });
         if (seeker && me.frozen) this.set("blindCount", seconds, (v) => { el["blind-count"].textContent = v; });

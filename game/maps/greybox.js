@@ -4,6 +4,8 @@
  * @module game/maps/greybox
  */
 
+import { nav } from "./greybox.nav.js";
+
 const boxes = [], ramps = [], props = [];
 const box = (x0, y0, z0, x1, y1, z1, mat) => boxes.push({ min: [x0, y0, z0], max: [x1, y1, z1], mat });
 const prop = (type, x, y, rot = 0, z = 0) => props.push({ type, pos: [x, y, z], rot });
@@ -45,7 +47,7 @@ export const greybox = {
     name: "Grey Box",
     test: true,
     env: { indoor: true },
-    boxes, ramps, props,
+    boxes, ramps, props, nav,
     spawns: {
         hider: [[0, 0, 0, 0], [3, -4, 0, 1.6], [-3, 6, 0, -1.6], [8, 6, 0, 3.1], [12, -5, 0, 1.6], [-8, 4, 0, 0], [-12, 2, 0, 0], [2, -9, 0, 1.6], [-10, 9.5, 1.6, 0], [10, 9, 0, 3.1]],
         seeker: [[-14.5, -10.5, 0, 0], [-13, -10.5, 0, 0], [-11.5, -10.5, 0, 0], [-14.5, -8, 0, 0], [-13, -8, 0, 0], [-11.5, -8, 0, 0], [-14.5, -9.2, 0, 0], [-12.2, -9.2, 0, 0]],
