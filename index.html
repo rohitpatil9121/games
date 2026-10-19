@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TIDEFALL</title>
+<meta name="description" content="TIDEFALL: raid the ruins the sea gives up at low tide, and race the flood back to camp. A multiplayer browser game on the Projection Lab engine.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view" tabindex="0" aria-label="The game view"></canvas>
+
+<section id="title" class="screen">
+  <h1>TIDEFALL</h1>
+  <p class="tag">Stage 1 prototype: is racing the flood fun?</p>
+  <button id="play" class="primary">Play the prototype</button>
+  <p class="small">WASD move · mouse look · Space jump · Shift sprint · E pick up · Q drop · F / right mouse grapple</p>
+</section>
+
+<div id="hud" hidden>
+  <div id="tide-clock"></div>
+  <div id="carry"></div>
+  <div id="bank"></div>
+  <div id="breath"><i></i></div>
+  <div id="prompt"></div>
+  <div id="crosshair"></div>
+  <pre id="debug"></pre>
+</div>
+<script type="module" src="game/main.js"></script>
+</body>
+</html>
