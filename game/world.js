@@ -1,4 +1,4 @@
-import { Entity, Mesh, InstancedMesh, Geometry, StandardMaterial, BasicMaterial, primitives, mat4 } from "../engine/index.js";
+import { Entity, Mesh, InstancedMesh, Geometry, StandardMaterial, BasicMaterial, ParticleSystem, primitives, mat4 } from "../engine/index.js";
 import { groundAt, normalAt } from "./island.js";
 import { teamColor, LOOT_KINDS, ISLAND } from "./data.js";
 
@@ -39,6 +39,14 @@ export class World {
         const loot = this.scene.add(new Entity({ name: "loot", mesh: this.lootMesh, frustumCulled: false }));
         loot.interpolate = false;
         this._bodyGeometry = primitives.capsule(0.35, 1.1, 6, 12);
+        // the grapple's rope: one line, rewritten each frame
+        this.ropeGeometry = new Geometry({ name: "rope", mode: "lines", dynamic: true, positions: new Float32Array(6), colors: new Float32Array([0.9, 0.85, 0.7, 1, 0.9, 0.85, 0.7, 1]) });
+        this.ropeEntity = this.scene.add(new Entity({ name: "rope", castShadow: false, frustumCulled: false, visible: false,
+            mesh: new Mesh(this.ropeGeometry, new BasicMaterial({ lit: false, vertexColors: true })) }));
+        this.ropeEntity.interpolate = false;
+        const particles = (options) => { const p = this.scene.add(new ParticleSystem(options)); p.castShadow = false; p.frustumCulled = false; return p; };
+        this.spray = particles({ capacity: 900, gravity: [0, 0, -9], drag: 1.2, blending: "normal", name: "spray" });
+        this.sparkle = particles({ capacity: 400, gravity: [0, 0, 1.5], drag: 2, name: "sparkle" });
         this._noseGeometry = primitives.box(0.18, 0.5, 0.18);
     }
 
@@ -161,6 +169,24 @@ export class World {
             n++;
         }
         m.count = n;
+    }
+
+    /** Show the grapple's rope from a hand to the hook, or hide it. */
+    rope(on, ax, ay, az, bx, by, bz) {
+        this.ropeEntity.visible = on;
+        if (!on) return;
+        this.ropeGeometry.positions.set([ax, ay, az, bx, by, bz]);
+        this.ropeGeometry.markDirty();
+    }
+
+    /** Water thrown up where something hits the surface. */
+    splash(x, y, z, strength = 1) {
+        this.spray.emit(Math.round(14 + 26 * strength), { position: [x, y, z + 0.05], spread: 0.4, velocity: [0, 0, 2.5 * strength], speed: 2.2 * strength, life: [0.4, 0.9], size: [0.16, 0.04], color: [0.85, 0.95, 1, 0.9], colorEnd: [0.7, 0.9, 1, 0] });
+    }
+
+    /** A glint: picking something up, banking it. */
+    glint(x, y, z, color, n = 24) {
+        this.sparkle.emit(n, { position: [x, y, z], spread: 0.3, speed: 2.4, life: [0.3, 0.8], size: [0.18, 0], color: [color[0] * 2.5, color[1] * 2.5, color[2] * 2.5, 1] });
     }
 
     /** Move the sea to the water level. */

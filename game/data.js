@@ -103,6 +103,8 @@ export const WATER = Object.freeze({
     /** a floating player's feet sit this far under the surface */
     float: 1.25,
     buoyancy: 9,
+    /** a little over critical damping for that spring (2 * sqrt 9 = 6): settles without bobbing */
+    bobDamping: 6.6,
     /** kilograms a swimmer can hold up; above this they sink and walk the sea floor */
     swimCapacity: 4,
     seabedWalk: 2.4,

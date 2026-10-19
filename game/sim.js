@@ -94,7 +94,7 @@ export function createPlayer(id, name = "Player") {
         buttons: 0,
         seq: 0,
         /** ticks since last on the ground (coyote time) and ticks since jump was last pressed (buffer) */
-        air: 0, jumpAge: 99,
+        air: 0, jumpAge: 99, pickAge: 99,
         /** loot ids carried, oldest first, and their total weight */
         carry: [], weight: 0,
         /** grapple: 1 while pulling toward (hx, hy, hz) */
@@ -147,7 +147,7 @@ export function spawnPlayer(state, island, p) {
     p.breath = WATER.breath * TICK_RATE;
     p.carry = []; p.weight = 0;
     p.hook = 0; p.hookCool = 0; p.stun = 0; p.blind = 0; p.respawn = 0;
-    p.air = 0; p.jumpAge = 99;
+    p.air = 0; p.jumpAge = 99; p.pickAge = 99;
     for (let i = 0; i < HISTORY; i++) { p.hist[i * 3] = p.x; p.hist[i * 3 + 1] = p.y; p.hist[i * 3 + 2] = p.z; }
     state.events.push({ type: "spawn", id: p.id });
 }
@@ -318,7 +318,9 @@ export function stepPlayer(island, p, input, level) {
     }
     if ((pressed & BTN.shove) && p.shoveCool === 0) { p.shoved = true; p.shoveCool = Math.round(TOOLS.shove.cooldown * TICK_RATE); }
     if ((pressed & BTN.flare) && p.flareCool === 0) { p.flared = true; p.flareCool = Math.round(TOOLS.flare.cooldown * TICK_RATE); }
-    if (pressed & BTN.interact) p.wantPick = true;
+    // a pick-up pressed a moment before the item is in reach still counts (input buffering)
+    if (pressed & BTN.interact) p.pickAge = 0; else if (p.pickAge < 99) p.pickAge++;
+    p.wantPick = p.pickAge <= 9;
     if (pressed & BTN.drop) p.wantDrop = true;
 
     const wasGround = p.ground;
@@ -340,8 +342,9 @@ export function stepPlayer(island, p, input, level) {
     } else if (p.water === 2) {
         // ---- swimming: a damped spring to the surface, slow strokes
         const top = WATER.swim * (0.75 + 0.25 * slow), target = level - WATER.float;
-        p.vz += (WATER.buoyancy * (target - p.z) - WATER.swimDrag * 1.6 * p.vz) * dt;
-        const drag = Math.max(0, 1 - WATER.swimDrag * dt);
+        p.vz += (WATER.buoyancy * (target - p.z) - WATER.bobDamping * p.vz) * dt;
+        // water drags hardest on a swimmer who has stopped stroking
+        const drag = Math.max(0, 1 - (wish > 0.1 ? WATER.swimDrag * 0.3 : WATER.swimDrag) * dt);
         p.vx *= drag; p.vy *= drag;
         const along = p.vx * wx + p.vy * wy, add = wish * top - along;
         if (add > 0) { const gain = Math.min(add, WATER.swimAccel * dt); p.vx += wx * gain; p.vy += wy * gain; }
@@ -421,9 +424,11 @@ export function stepPlayer(island, p, input, level) {
     const g = groundAt(island, p.x, p.y);
     if (p.z <= g) { p.z = g; if (p.vz < 0) p.vz = 0; onGround = true; }
     else if (!onGround && wasGround && !jumping && !p.hook && p.vz <= 0 && p.water !== 2) {
-        // walking off a step or downhill: stay on the ground instead of taking flight
-        if (p.z - g <= MOVE.step) { p.z = g; p.vz = 0; onGround = true; }
-        else { const z = p.z; if (slideZ(p, -MOVE.step)) onGround = true; else p.z = z; }
+        // walking off a step or downhill: stay on the ground instead of taking flight. A box top within a
+        // step below comes first (snapping to the terrain under a platform would put the feet inside it).
+        const z = p.z;
+        if (slideZ(p, -MOVE.step) && p.z >= g) { onGround = true; p.vz = 0; }
+        else { p.z = z; if (z - g <= MOVE.step) { p.z = g; p.vz = 0; onGround = true; if (blocked(p)) { p.z = z; onGround = false; } } }
     }
     if (p.water === 2 && p.z <= g + 0.02) onGround = true;
     p.ground = onGround;
@@ -485,7 +490,8 @@ export { reachable as reachableLoot };
 
 function pickUp(state, p) {
     const item = reachable(state, p);
-    if (!item) { state.events.push({ type: "nopick", id: p.id }); return; }
+    if (!item) { if (p.pickAge === 0) state.events.push({ type: "nopick", id: p.id }); return; }
+    p.pickAge = 99;
     item.holder = p.id;
     p.carry.push(item.id);
     p.weight += weightOf(item.kind);

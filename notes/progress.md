@@ -67,3 +67,27 @@ controls myself, only the numbers. Kept.
   A single wreck can't be the same distance from four camps.
 - `nav.js` (Dijkstra fields over the heightmap nodes, speed by water depth) started at 35 s for one check
   because a float32 distance field kept re-relaxing nodes; doubles fixed it: 4 ms per field.
+
+## Stage 3: movement feel (`physics-tuning`, `camera-systems`, `input-systems`, `game-feel`)
+
+- `physics-tuning`: fixed 60 Hz step with render interpolation (already the engine's Loop); no tunnelling,
+  because the fastest thing (grapple pull, 19 m/s, 0.32 m a tick) is slower than the thinnest wall plus
+  the body's width (1.0 m). Verified by stress rather than argument: `tools/test.mjs` drives 8 players
+  with random input for 4 minutes and checks every tick that nobody is inside a ruin or under the ground.
+  It found one real bug on the first run: walking down off a 0.4 m platform snapped the feet to the
+  terrain *under* the platform. Fixed (box tops first, then terrain). The swimming spring bobbed
+  (3 crossings of the rest height); damping raised to just over critical (6.6 against 2·√9 = 6): 0 now.
+- `input-systems`: actions, not keys; per-device bindings (keyboard/mouse, gamepad, touch); edges for
+  discrete actions; a radial deadzone rescaled from its edge (the engine's is per axis); input buffering:
+  a jump pressed up to 7 ticks early, a pick-up up to 9 ticks early; coyote time 7 ticks. Buffering lives
+  in `sim.js`, so the server and the predicting client agree on it.
+- `camera-systems`: `game/camera.js`, an over-the-shoulder orbit on a spring arm (ray against terrain and
+  ruins, in at once, out slowly), exponential smoothing in real time, a small lead in the direction of
+  travel, kept off the water's surface, and an eased `under` value for the underwater fade.
+  Aim: tools leave from the head, which is beside the camera, so on the tick a tool is used the client
+  aims from the head at what is under the crosshair. The crosshair turns into a ring when the grapple
+  would reach.
+- `game-feel`: splashes going in and out of deep water, a glint on pick-up and banking, a small shake on a
+  hard landing and when the flood takes your loot, a wider view while the grapple pulls.
+- Tests: 13 pass (stress, determinism, floating, bobbing, swim speed 2.58 m/s, sinking with an idol and
+  letting go after 9.2 s, ledge climb, coyote, jump buffer, grapple, tide monotonic and smooth).
