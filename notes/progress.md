@@ -91,3 +91,29 @@ controls myself, only the numbers. Kept.
   hard landing and when the flood takes your loot, a wider view while the grapple pulls.
 - Tests: 13 pass (stress, determinism, floating, bobbing, swim speed 2.58 m/s, sinking with an idol and
   letting go after 9.2 s, ledge climb, coyote, jump buffer, grapple, tide monotonic and smooth).
+
+## Stage 4: BREACH's net skeleton
+
+Copied and adapted, not rewritten: `server/server.mjs` (static files + `ws` on one port, 4-letter rooms,
+quick play, per-address limits, the 60 Hz clock; port 8150 so it can run beside BREACH's 8140),
+`server/room.mjs` (input queue with time credit, lag compensation from the reported view tick, bot fill,
+rate limits, per-client delta snapshots), `game/net.js` (Loopback, SocketTransport, Conditions, Client
+with prediction, reconciliation and interpolation), `game/protocol.js` (binary `in` and `snap`, JSON for
+the rest). `ws` was copied from BREACH's node_modules (8.22.0), not downloaded.
+
+What changed for TIDEFALL:
+- The tide needs no bandwidth: `welcome`/`start` carry the island seed and team count, every client
+  generates the same island and computes the water from the tick.
+- Prediction needs the water level, which depends on the tick an input lands on. The client counts it:
+  an input acknowledged by the snapshot for tick T landed on T, so pending inputs land on T+1, T+2…
+  Replays use those levels.
+- Snapshots carry loot (changed items and ids gone) instead of pickups and rockets; your own player
+  includes the grapple point and every cooldown, so a replay starts from exactly the server's state.
+- A room makes its island with `fairIsland()`, so an unfair seed is skipped before anyone sees it.
+
+Verified: server up, `/status` answers; tab A created room KGUC, tab B joined it by code; both had the
+same island seed and were put on different teams. B walked 20 m; B's last reconciliation error was
+0.0000 m; A's interpolation drew B at (-12.12, -0.39), exactly where B was. Practice runs the same Room
+in the page. No console errors in either tab, none in the server log. Bug found on the way: the
+transport's held messages were only pumped once an island existed, and the island arrives in a held
+message; the pump now runs first.

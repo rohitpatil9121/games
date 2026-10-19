@@ -48,6 +48,8 @@ export class World {
         this.spray = particles({ capacity: 900, gravity: [0, 0, -9], drag: 1.2, blending: "normal", name: "spray" });
         this.sparkle = particles({ capacity: 400, gravity: [0, 0, 1.5], drag: 2, name: "sparkle" });
         this._noseGeometry = primitives.box(0.18, 0.5, 0.18);
+        /** where each drawn player is this frame, for hanging their loot on them: id → { x, y, z, fx, fy, face } */
+        this.carriers = new Map();
     }
 
     /** Build the scene for an island. */
@@ -140,29 +142,48 @@ export class World {
         return p;
     }
 
-    /** Place a player: position, facing (radians) and visibility. */
-    placePlayer(id, team, x, y, z, face, alive) {
-        const p = this.playerEntity(id, team);
-        p.root.visible = alive;
-        p.root.setPosition(x, y, z);
-        p.root.setYaw(face);
-        p.root.teleport();
+    /**
+     * Draw every player: my own where prediction puts it (`me`, already interpolated between ticks), the
+     * others where the client's interpolation says they were a moment ago.
+     */
+    drawPlayers(client, me) {
+        const seen = this._seen || (this._seen = new Set()), sample = this._sample || (this._sample = {});
+        seen.clear();
+        this.carriers.clear();
+        for (const [id, info] of client.players) {
+            let x, y, z, face, alive;
+            if (id === client.id) {
+                const p = client.me;
+                x = me.x; y = me.y; z = me.z; face = Math.atan2(p.fy, p.fx); alive = p.alive;
+            } else {
+                if (!client.sample(id, sample)) continue;
+                x = sample.x; y = sample.y; z = sample.z; face = sample.face; alive = (sample.flags & 1) !== 0;
+            }
+            seen.add(id);
+            const e = this.playerEntity(id, info.team);
+            e.root.visible = alive;
+            e.root.setPosition(x, y, z);
+            e.root.setYaw(face);
+            this.carriers.set(id, { x, y, z, fx: Math.cos(face), fy: Math.sin(face), face });
+        }
+        for (const id of [...this.players.keys()]) if (!seen.has(id)) this.removePlayer(id);
     }
 
     /** Draw the loot: everything lying about, and what each player carries on their back. */
-    drawLoot(loot, carriers) {
-        const m = this.lootMesh;
+    drawLoot(client) {
+        const m = this.lootMesh, t = this.time, stack = this._stack || (this._stack = new Map());
+        stack.clear();
         let n = 0;
-        const t = this.time;
-        for (const item of loot) {
+        for (const item of client.loot.values()) {
             if (n >= m.capacity) break;
             const s = LOOT_SIZE[item.kind], c = LOOT_COLORS[item.kind];
             let x = item.x, y = item.y, z = item.z + s / 2, spin = t * 0.8 + item.id;
             if (item.holder) {
-                const at = carriers.get(item.holder);
+                const at = this.carriers.get(item.holder);
                 if (!at) continue;
-                const k = at.index.get(item.id) || 0;
-                x = at.x - at.fx * 0.4; y = at.y - at.fy * 0.4; z = at.z + 1.1 + k * 0.3; spin = at.face;
+                const k = stack.get(item.holder) || 0;
+                stack.set(item.holder, k + 1);
+                x = at.x - at.fx * 0.42; y = at.y - at.fy * 0.42; z = at.z + 1.0 + k * 0.32 + s / 2; spin = at.face;
             } else z += 0.1 + Math.sin(t * 2 + item.id) * 0.06;
             m.setTransform(n, x, y, z, s, s, s, spin);
             m.setColor(n, c[0], c[1], c[2], 1);

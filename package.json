@@ -8,5 +8,8 @@
     "static": "node tools/serve.mjs",
     "check": "node tools/check-island.mjs",
     "test": "node tools/test.mjs && node tools/check-island.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
   }
 }

@@ -5,16 +5,48 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>TIDEFALL</title>
 <meta name="description" content="TIDEFALL: raid the ruins the sea gives up at low tide, and race the flood back to camp. A multiplayer browser game on the Projection Lab engine.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d4a5e'/%3E%3Cpath d='M3 20c4-4 7-4 10 0s6 4 10 0 6-4 6-4v12H3z' fill='%23e8d6a8'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <canvas id="view" tabindex="0" aria-label="The game view"></canvas>
 
-<section id="title" class="screen">
-  <h1>TIDEFALL</h1>
-  <p class="tag">Stage 1 prototype: is racing the flood fun?</p>
-  <button id="play" class="primary">Play the prototype</button>
-  <p class="small">WASD move · mouse look · Space jump · Shift sprint · E pick up · Q drop · F / right mouse grapple</p>
+<section id="title" class="screen" aria-labelledby="title-h">
+  <div class="panel">
+    <h1 id="title-h">TIDEFALL</h1>
+    <p class="tag">The sea goes out. The ruins come up. Get back before it returns.</p>
+    <label class="field">Your name <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player"></label>
+    <fieldset class="row">
+      <legend>Practice against bots, or create a room</legend>
+      <label>Teams <select id="p-teams"><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+      <label>Players <select id="p-bots"></select></label>
+      <label>Bots <select id="p-skill"><option value="1">Easy</option><option value="2">Normal</option><option value="3">Hard</option></select></label>
+    </fieldset>
+    <div class="buttons">
+      <button id="practice" class="primary">Practice</button>
+      <button id="quick">Quick play</button>
+      <button id="create">Create a room</button>
+    </div>
+    <form id="join-form" class="row">
+      <input id="code" maxlength="4" placeholder="Code" aria-label="Room code" autocomplete="off" spellcheck="false">
+      <button id="join" type="submit">Join</button>
+    </form>
+    <p id="server-status" class="small" role="status">Looking for a server…</p>
+  </div>
+</section>
+
+<section id="pause" class="screen" hidden aria-labelledby="pause-h">
+  <div class="panel">
+    <h2 id="pause-h">Paused <span class="small">(the tide doesn't wait)</span></h2>
+    <p id="room-line" class="small">Room <b id="room-code"></b> <button id="invite" class="link">Copy invite link</button></p>
+    <div class="buttons"><button id="resume" class="primary">Resume</button><button id="leave">Leave</button></div>
+    <details id="nettest">
+      <summary>Network test: add lag to your own link</summary>
+      <label>Ping <input id="net-latency" type="range" min="0" max="400" step="10" value="0"> <output id="net-latency-out"></output></label>
+      <label>Jitter <input id="net-jitter" type="range" min="0" max="100" step="5" value="0"> <output id="net-jitter-out"></output></label>
+      <label>Loss <input id="net-loss" type="range" min="0" max="10" step="1" value="0"> <output id="net-loss-out"></output></label>
+    </details>
+  </div>
 </section>
 
 <div id="hud" hidden>
@@ -23,8 +55,9 @@
   <div id="bank"></div>
   <div id="breath"><i></i></div>
   <div id="prompt"></div>
+  <div id="notice"></div>
   <div id="crosshair"></div>
-  <pre id="debug"></pre>
+  <pre id="debug" hidden></pre>
 </div>
 <script type="module" src="game/main.js"></script>
 </body>
