@@ -2,10 +2,12 @@ import { Game, Camera, PostFX } from "../engine/index.js";
 import { LOOT, LOOT_KINDS, TICK_RATE, BTN, MATCH, TOOLS, TEAM_NAMES, teamColor } from "./data.js";
 import { quantizeYaw, quantizePitch } from "./det.js";
 import { reachableLoot } from "./sim.js";
-import { tideAt, matchLeft } from "./tide.js";
+import { tideAt, matchLeft, waterAt } from "./tide.js";
+import { generateIsland, groundAt } from "./island.js";
 import { Client, Loopback, SocketTransport, Conditions } from "./net.js";
 import { PROTOCOL, NAME_MAX, cleanText } from "./protocol.js";
 import { World } from "./world.js";
+import { loadCharacters } from "./characters.js";
 import { Controls, defaultBindings } from "./controls.js";
 import { ThirdPerson } from "./camera.js";
 import { Hud } from "./hud.js";
@@ -36,7 +38,7 @@ const canvas = $("view");
 const game = new Game({ canvas, quality: "high", antialias: false, camera: new Camera({ mode: "orbit", fov: settings.fov, near: 0.1, far: 900 }) });
 if (game.failed) throw new Error("WebGL unavailable");
 const { renderer, camera, input } = game;
-renderer.postfx = new PostFX(renderer, { bloom: { threshold: 1.2, intensity: 0.35 }, vignette: 0.2, grain: 0.01 });
+renderer.postfx = new PostFX(renderer, { bloom: { threshold: 1.15, intensity: 0.4 }, vignette: 0.22, grain: 0.01, contrast: 1.1, saturation: 1.12, exposure: 0.97 });
 
 const world = new World(game);
 const client = new Client();
@@ -225,12 +227,14 @@ function onEvent(e) {
             break;
         }
         case "drop":
+            if (e.why === "gasp" && whereIs(e.id, spot)) world.sink(spot.x, spot.y, spot.z);
             if (e.why === "gasp") { if (mine) { game.juice.shake(0.25); notice("Out of breath: the heavy loot sinks", 3); } else hud.feed(`${hud.who(e.id)} lost loot to the sea`, team(e.id)); }
             break;
         case "drown":
             if (mine) notice("Drowned. Back to camp", 3); else hud.feed(`${hud.who(e.id)} drowned`, team(e.id));
             break;
         case "shove":
+            if (e.id !== me.id) world.shove(e.id);
             if (!e.target) break;
             if (whereIs(e.target, spot)) world.puff(spot.x, spot.y, spot.z, client.level(client.clock) > spot.z + 0.8);
             if (e.target === me.id) { game.juice.shake(e.behind ? 0.55 : 0.35); notice(e.behind ? "Shoved from behind!" : "Shoved!", 1.5); }
@@ -263,6 +267,7 @@ game.onUpdate(() => {
     // on the tick a tool is used, aim from the head at what the crosshair is on (camera.js aimAt)
     if ((pressed & (BTN.grapple | BTN.flare)) && client.island) { const t = rig.aimAt(client.island, client.me); yaw = t.yaw; pitch = t.pitch; }
     client.tick({ mx: c.mx, my: c.my, buttons: c.buttons, yaw: quantizeYaw(yaw), pitch: quantizePitch(pitch) });
+    if (client.me.shoved) world.shove(client.id);
     if (room) room.tick();
 });
 
@@ -275,25 +280,31 @@ game.onRender((dt, alpha) => {
     if (client.transport) client.frame(dt);
     if (!client.transport || !client.island) {
         // behind the menu: a slow turn high over the sea
-        camera.mode = "orbit"; camera.target.set([0, 0, 0]); camera.distance = 150; camera.pitch = 0.45; camera.yaw += dt * 0.03;
+        camera.mode = "orbit"; camera.target.set([0, 0, 2]); camera.distance = 120; camera.pitch = 0.32; camera.yaw += dt * 0.03;
+        camera.update(0);
+        if (world.island) world.setWater(waterAt(world.island.seed, 42 * 60), 42 * 60, 0, camera.eye);
         world.update(dt);
         return;
     }
     const me = client.me, island = client.island;
     controls.look(dt);
     tideAt(island.seed, Math.max(0, client.clock), tide);
-    world.setWater(tide.level);
+    world.level = tide.level;
     client.myPosition(alpha, at);
     at.vx = me.vx; at.vy = me.vy;
     fx.fov += ((me.hook ? 9 : 0) - fx.fov) * (1 - Math.exp(-dt * 6));
     rig.update(dt, at, view, island, tide.level, { fov: settings.fov + fx.fov });
+    camera.update(0);
+    world.setWater(tide.level, client.clock, rig.under, camera.eye);
 
     // splashes for my own player
     const wet = me.water >= 2 ? 1 : 0;
     if (wet !== fx.wasWater && me.alive) world.splash(me.x, me.y, tide.level, wet ? Math.min(1.5, 0.4 + Math.abs(me.vz) / 6) : 0.4);
     fx.wasWater = wet;
 
-    world.drawPlayers(client, at);
+    const steps = world.drawPlayers(client, at, dt);
+    // footfalls kick up sand on dry ground
+    for (const id of steps) { const c = world.carriers.get(id); if (c && c.z > tide.level) world.kick(c.x, c.y, c.z, 4); }
     // ropes: mine from prediction, the others' from their snapshot rows
     world.beginRopes();
     if (me.hook && me.alive) world.rope(at.x, at.y, at.z + 1.3, me.hx, me.hy, me.hz);
@@ -306,9 +317,6 @@ game.onRender((dt, alpha) => {
     world.drawLoot(client);
     world.update(dt);
 
-    const sc = game.scene, u = rig.under;
-    sc.fogColor.set([0.6 + (0.05 - 0.6) * u, 0.74 + (0.25 - 0.74) * u, 0.86 + (0.32 - 0.86) * u]);
-    sc.fogDensity = 0.004 + 0.085 * u;
     const aim = me.alive ? rig.aimAt(island, me) : null;
     $("crosshair").classList.toggle("reach", !!aim && aim.reach && me.hookCool === 0);
 
@@ -341,8 +349,20 @@ function nearestLoot(me) {
 }
 
 show("title");
+// the island behind the title screen: any seed will do
+world.loadIsland(generateIsland(20261020, 4));
+await loadCharacters().catch((e) => console.warn("characters", e));
 game.start();
 
 /** console hook, for poking at the game and for the tools */
 window.tidefall = { game, world, client, controls, view, rig, input, save, settings, conditions, startPractice, playOnline, online, show, resume,
-    get room() { return room; }, get screen() { return screen; }, debug() { startPractice(); return "ok"; } };
+    get room() { return room; }, get screen() { return screen; }, debug() { startPractice(); return "ok"; },
+    /** Practice only: jump the match to a tick and put me somewhere, looking somewhere (for screenshots and checks) */
+    stage(tick, x, y, yaw = view.yaw, pitch = view.pitch) {
+        if (!room) return "no practice room";
+        room.state.tick = tick;
+        const p = room.state.players.find((q) => q.id === client.id);
+        if (x !== undefined) { p.x = x; p.y = y; p.z = groundAt(room.island, x, y) + 0.05; p.vx = p.vy = p.vz = 0; }
+        view.yaw = yaw; view.pitch = pitch;
+        return room.state.tick;
+    } };
