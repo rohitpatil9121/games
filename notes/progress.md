@@ -285,3 +285,26 @@ Scorecard, character rows: Hero/player 2 → 3 (layered model: hats, hair, sack,
 one-shots and secondary motion); Rivals readable at a distance 2 → 2 (better, by the pennant, but the
 coral team is close to the skin tones); VFX/motion 2 → 2. Average 2.1 → 2.2; premium needs 2.3.
 Not done: facial animation (blinks, expressions), and motion has only been judged from stills.
+
+## Visual pass: breakers, beach, faces, team colour
+
+- Breakers: bands that roll toward the shore over 0.15 to 2.4 m of water (depth stands in for distance from
+  the beach), rising in the vertex shader (the water now reads the height texture there too) and breaking
+  white in the fragment shader, with a churned trail behind each.
+- Beach: a wrack line of weed all the way round at the high-water mark (it also says "the sea comes up to
+  here"), beached rowboats, washed-up crates and barrels, shrubs and grass on the dunes.
+- Faces: lids that blink every 2 to 5.5 s, brows that lift, pupils that shrink, and three mouths (grin,
+  open smile with teeth, an O), all on bones of their own; glad while celebrating a bank (and for a moment
+  after), scared when staggered, sunk, drowning, or swimming with a heavy load. Captured: artifacts/face-*.jpg.
+- Team colour: Coral (close to the skin tones) became Crimson; the colour-blind scheme's orange (also close
+  to skin) became the Okabe-Ito blue.
+
+Measured: shore view contrast 47.5 → 61, entropy 5.02 → 5.21, edges 0.085 → 0.115; beach view entropy
+5.32 → 5.57, edges 0.105 → 0.145. Camp view with 8 players: 86 draws, 258 k triangles (was 232 k), frame
+0.5 ms median / 7.8 ms worst on Intel UHD (within this measure's noise of the earlier 0.7 to 1.6 ms).
+Raider: 8,264 triangles, 510 KB. `npm test` 26/26; no console errors in the captures.
+
+Scorecard: World 2 → 3 (layered beach: wrack line, boats, flotsam, shrubs, crabs, gulls, breakers),
+Hero 3, Rivals 2 → 3 (crimson and the pennant read at 30 m on every side), VFX/motion 2. Average 2.2 → 2.4,
+over the 2.3 premium line on these measures. Still judged only from stills: the motion has not been seen
+by a person.

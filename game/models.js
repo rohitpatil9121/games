@@ -175,4 +175,48 @@ export function shellParts(x, y, z, seed) {
     return [part(primitives.sphere(0.09, 8, 5), [x, y, z + 0.03], [0.96, 0.88, 0.8, 1], null, [1.2, 1, 0.5])];
 }
 
+/** A wrack clump: seaweed and bits the sea left at its high-water line (dark, flat, tangled). */
+export function wrackParts(x, y, z, seed) {
+    const parts = [], cols = [[0.2, 0.26, 0.12, 1], [0.32, 0.27, 0.14, 1], [0.15, 0.2, 0.1, 1]];
+    for (let k = 0; k < 4; k++) {
+        const a = seed * 1.7 + k * 1.9, d = 0.15 + ((seed * 5 + k) % 1) * 0.35, L = 0.35 + ((seed * 3 + k * 0.7) % 1) * 0.5;
+        parts.push(part(primitives.box(L, 0.1 + (k % 2) * 0.06, 0.03), [x + Math.cos(a) * d, y + Math.sin(a) * d, z + 0.02 + k * 0.01], cols[k % 3], [0, 0.1 * (k % 2), a]));
+    }
+    return parts;
+}
+
+/** A small rowboat beached on its side (or upside down), with a broken oar. */
+export function rowboatParts(x, y, z, seed) {
+    const yaw = seed * 2.3, c = Math.cos(yaw), s = Math.sin(yaw), wood = [0.55, 0.36, 0.2, 0.6], dark = [0.36, 0.22, 0.12, 0.6], paint = [[0.25, 0.45, 0.6, 1], [0.75, 0.3, 0.2, 1], [0.9, 0.85, 0.7, 1]][Math.floor(seed * 7) % 3];
+    const at = (fx, fy, fz) => [x + fx * c - fy * s, y + fx * s + fy * c, z + fz];
+    const tilt = 0.45 + (seed % 0.3);
+    return [
+        part(primitives.box(2.6, 0.08, 0.5), at(0, -0.55, 0.32), paint, [tilt, 0, yaw]),
+        part(primitives.box(2.6, 0.08, 0.5), at(0, 0.45, 0.42), wood, [tilt, 0, yaw]),
+        part(primitives.box(2.4, 1.0, 0.07), at(0, -0.05, 0.12), dark, [tilt, 0, yaw]),
+        part(primitives.box(0.08, 1.0, 0.5), at(1.25, -0.05, 0.36), wood, [tilt, 0, yaw]),
+        part(primitives.cylinder(0.25, 0.02, 0.45, 4), at(-1.45, -0.05, 0.33), wood, [0, Math.PI / 2, yaw]),
+        part(primitives.box(0.08, 0.95, 0.06), at(0.3, -0.05, 0.5), dark, [tilt, 0, yaw]),
+        part(primitives.cylinder(0.035, 0.035, 1.6, 5), at(0.4, 1.5, 0.05), wood, [Math.PI / 2, 0, yaw + 0.6]),
+        part(primitives.box(0.16, 0.4, 0.03), at(0.9, 2.1, 0.04), wood, [0, 0, yaw + 0.6]),
+    ];
+}
+
+/** A washed-up crate, half sunk, or a barrel on its side. */
+export function flotsamParts(x, y, z, seed) {
+    const wood = [0.58, 0.42, 0.25, 0.6];
+    if (seed % 2 < 1) return [part(primitives.box(0.6, 0.6, 0.6), [x, y, z + 0.15], wood, [0.2, 0.15, seed * 3])];
+    return [part(primitives.cylinder(0.25, 0.25, 0.75, 10), [x, y, z + 0.2], [0.5, 0.33, 0.18, 0.6], [Math.PI / 2, 0, seed * 2])];
+}
+
+/** A low beach shrub: a few rounded clumps of leaves. */
+export function shrubParts(x, y, z, seed) {
+    const parts = [], greens = [[0.3, 0.5, 0.22, 1], [0.38, 0.56, 0.25, 1], [0.26, 0.42, 0.2, 1]];
+    for (let k = 0; k < 4; k++) {
+        const a = seed + k * 1.6, d = k ? 0.35 : 0, r = 0.35 + ((seed * 13 + k) % 1) * 0.25;
+        parts.push(part(primitives.sphere(r, 8, 6), [x + Math.cos(a) * d, y + Math.sin(a) * d, z + r * 0.55], greens[k % 3], null, [1, 1, 0.75]));
+    }
+    return parts;
+}
+
 export { part, merge };

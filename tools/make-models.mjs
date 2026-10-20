@@ -25,6 +25,9 @@
  * (game/characters.js), so everyone shares one mesh and one material, and differs in a palette and a few
  * bone scales. The sack hangs from `pack`, which the game scales with what the player carries.
  *
+ * FACE. Lids (closed by scale for a blink), brows (lifted), pupils (shrink when scared) and three mouths
+ * (a grin, an open smile, an O) are on bones of their own; the game sets the expression (game/characters.js).
+ *
  * Palette slots: 0 team · 1 skin · 2 hair · 3 canvas (shorts, sack) · 4 hat · 5 leather and wood
  *   6 eye white · 7 ink (pupils, brows, mouth, the hook's iron)
  *
@@ -84,6 +87,13 @@ const J = skeleton([
     { name: "hairB", parent: "head", at: [0, -0.12, 1.66] },
     { name: "hairC", parent: "head", at: [0, 0, 1.6] },
     { name: "beard", parent: "head", at: [0, 0.08, 1.5] },
+    // the face: lids that close for a blink, brows that lift, pupils that shrink, and three mouths of which one shows
+    { name: "lids", parent: "head", at: [0, 0.13, 1.66] },
+    { name: "brows", parent: "head", at: [0, 0.14, 1.69] },
+    { name: "pupils", parent: "head", at: [0, 0.146, 1.632] },
+    { name: "mouth", parent: "head", at: [0, 0.152, 1.535] },
+    { name: "smile", parent: "head", at: [0, 0.152, 1.535] },
+    { name: "gasp", parent: "head", at: [0, 0.152, 1.53] },
 ]);
 const j = (name) => J.index(name);
 const band = (a, b, z0, half) => (p) => { const t = Math.max(0, Math.min(1, (z0 + half - p[2]) / (2 * half))); return [[a, 1 - t], [b, t]]; };
@@ -144,11 +154,17 @@ function raider() {
     // eyes: big whites and dark pupils looking a touch inward, brows that can carry a mood
     for (const s of [-1, 1]) {
         body.add(sphere(1, 12, 8), { at: [s * 0.05, 0.128, 1.635], scale: [0.032, 0.02, 0.036], color: pal(WHITE), skin: H });
-        body.add(sphere(1, 10, 6), { at: [s * 0.046, 0.146, 1.632], scale: [0.017, 0.008, 0.02], color: pal(INK), skin: H });
-        body.add(roundedBox(0.06, 0.02, 0.018, 0.008), { at: [s * 0.052, 0.14, 1.69], rot: [0, s * -0.18, 0], color: pal(HAIR), skin: H });
+        body.add(sphere(1, 10, 6), { at: [s * 0.046, 0.146, 1.632], scale: [0.017, 0.008, 0.02], color: pal(INK), skin: j("pupils") });
+        body.add(roundedBox(0.06, 0.02, 0.018, 0.008), { at: [s * 0.052, 0.14, 1.69], rot: [0, s * -0.18, 0], color: pal(HAIR), skin: j("brows") });
+        // the lid: a skin-coloured cap over the eye, hung from the brow line, which the game lowers to blink
+        body.add(sphere(1, 12, 6), { at: [s * 0.05, 0.13, 1.66 - 0.024], scale: [0.036, 0.024, 0.026], color: pal(SKIN), skin: j("lids") });
     }
-    // a wide, slightly lopsided grin
-    body.add(roundedBox(0.075, 0.02, 0.016, 0.007), { at: [0.006, 0.152, 1.535], rot: [0, 0.08, 0], color: pal(INK), skin: H });
+    // mouths: a lopsided grin (rest), a wide open smile with teeth (glad), an O (scared)
+    body.add(roundedBox(0.075, 0.02, 0.016, 0.007), { at: [0.006, 0.152, 1.535], rot: [0, 0.08, 0], color: pal(INK), skin: j("mouth") });
+    body.add(roundedBox(0.1, 0.02, 0.045, 0.02), { at: [0, 0.15, 1.532], color: pal(INK), skin: j("smile") });
+    body.add(roundedBox(0.085, 0.022, 0.016, 0.006), { at: [0, 0.157, 1.546], color: pal(WHITE), skin: j("smile") });
+    for (const s of [-1, 1]) body.add(roundedBox(0.03, 0.02, 0.02, 0.008), { at: [s * 0.055, 0.148, 1.552], rot: [0, -s * 0.5, 0], color: pal(INK), skin: j("smile") });
+    body.add(sphere(1, 12, 8), { at: [0, 0.15, 1.53], scale: [0.022, 0.012, 0.03], color: pal(INK), skin: j("gasp") });
 
     // ---------------- variants on their own bones (the game hides all but one of each)
     // hat A: the wide straw sun hat with a team band

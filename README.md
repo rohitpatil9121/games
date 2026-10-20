@@ -12,7 +12,7 @@
 
 ## The game
 
-Two to four crews of beachcombers (up to eight players, bots in empty places) camp on the high ground of an
+Two to four crews of beachcombers (crimson, teal, gold, violet) (up to eight players, bots in empty places) camp on the high ground of an
 island where the sea rises and falls on a clock. When it goes out, a drowned town comes up out of the sand.
 You run down, grab what you can carry, and race the flood back to your camp's chest. Nothing counts until
 it's banked.

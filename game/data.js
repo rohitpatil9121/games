@@ -166,13 +166,14 @@ export const MAX_REWIND = 12;
 
 /**
  * Team colours (linear rgb). Each scheme's four colours differ in lightness as well as hue, so they hold up
- * for the common kinds of colour blindness.
+ * for the common kinds of colour blindness, and none is near a skin tone (the first team was coral, which a
+ * raider's arms and face blended into; it is crimson now). The safe scheme is from the Okabe-Ito palette.
  */
 export const TEAM_SCHEMES = Object.freeze({
-    standard: { name: "Coral, teal, gold, violet", colors: [[0.98, 0.36, 0.26], [0.12, 0.72, 0.68], [0.98, 0.78, 0.18], [0.55, 0.36, 0.92]] },
-    safe: { name: "Colour-blind safe", colors: [[0.9, 0.6, 0.0], [0.34, 0.71, 0.91], [0.94, 0.89, 0.26], [0.8, 0.47, 0.65]] },
+    standard: { name: "Crimson, teal, gold, violet", colors: [[0.84, 0.1, 0.2], [0.12, 0.72, 0.68], [0.98, 0.78, 0.18], [0.55, 0.36, 0.92]] },
+    safe: { name: "Colour-blind safe", colors: [[0.0, 0.45, 0.7], [0.94, 0.89, 0.26], [0.0, 0.62, 0.45], [0.8, 0.47, 0.65]] },
 });
-export const TEAM_NAMES = ["Coral", "Teal", "Gold", "Violet"];
+export const TEAM_NAMES = ["Crimson", "Teal", "Gold", "Violet"];
 export const teamColors = { scheme: "standard" };
 export function teamColor(team) {
     const s = TEAM_SCHEMES[teamColors.scheme] || TEAM_SCHEMES.standard;

@@ -72,7 +72,10 @@ export class Raider {
         quat.copy(this.body.rotation, a.upright);
 
         const ix = (name) => sk.index(name);
-        this.bones = { hips: ix("hips"), spine: ix("spine"), chest: ix("chest"), head: ix("head"), pack: ix("pack"), flag: ix("flag"), hairB: ix("hairB") };
+        this.bones = { hips: ix("hips"), spine: ix("spine"), chest: ix("chest"), head: ix("head"), pack: ix("pack"), flag: ix("flag"), hairB: ix("hairB"),
+            lids: ix("lids"), brows: ix("brows"), pupils: ix("pupils"), mouth: ix("mouth"), smile: ix("smile"), gasp: ix("gasp") };
+        // the face: a blink every few seconds, and an expression eased toward what is happening
+        this.blinkIn = 1 + (id % 5) * 0.6; this.blink = 0; this.glad = 0; this.fear = 0; this.gladFor = 0;
         // the look: one hat, one hairstyle (or none under a cap), maybe a beard; the rest scaled away
         const hair = pick(id, 5, 4);
         this.hidden = [];
@@ -92,7 +95,7 @@ export class Raider {
     setColor(c) { this.palette.set(c, 0); }
 
     /** Play a one-shot clip over whatever else (shove, hookThrow, celebrate, drown). */
-    play(name) { this.oneShot = name; this.oneShotLeft = ONE_SHOT[name] || 0.5; this.animator.play(name, { fade: 0.05, loop: false, restart: true }); }
+    play(name) { if (name === "celebrate") this.gladFor = 2.2; this.oneShot = name; this.oneShotLeft = ONE_SHOT[name] || 0.5; this.animator.play(name, { fade: 0.05, loop: false, restart: true }); }
     shove() { this.play("shove"); }
 
     /**
@@ -160,6 +163,23 @@ export class Raider {
         rotate(pose, b.flag, 0, 1, 0, Math.sin(this.flap) * 0.18 + this.bank * 0.8);
         rotate(pose, b.hairB, 1, 0, 0, this.tail * 0.6 - this.lean);
         rotate(pose, b.hairB, 0, 0, -1, this.tail * 0.4);
+        // ---- the face
+        if ((this.blinkIn -= dt) <= 0) { this.blinkIn = 2 + Math.random() * 3.5; this.blink = 0.16; }
+        const closing = this.blink > 0 ? Math.sin(((0.16 - this.blink) / 0.16) * Math.PI) : 0;
+        this.blink = Math.max(0, this.blink - dt);
+        if (this.gladFor > 0) this.gladFor -= dt;
+        const scared = (f & FLAG.stun) || (f & FLAG.sunk) || this.oneShot === "drown" || ((f & FLAG.swim) && heavy) || !alive;
+        this.fear += ((scared ? 1 : 0) - this.fear) * k(8);
+        this.glad += ((this.gladFor > 0 && !scared ? 1 : 0) - this.glad) * k(8);
+        const show = (bone, v) => { const o = bone * POSE_STRIDE + 7; pose[o] = pose[o + 1] = pose[o + 2] = v; };
+        // lids: closed for a blink, half down when glad (a squint), wide open when scared
+        { const o = b.lids * POSE_STRIDE + 7; pose[o] = 1; pose[o + 2] = 1; pose[o + 1] = Math.max(closing, this.glad * 0.45) * (1 - this.fear * 0.8) + 0.001; }
+        // brows up when scared or glad; pupils small when scared
+        pose[b.brows * POSE_STRIDE + 1] += 0.018 * this.fear + 0.008 * this.glad;
+        show(b.pupils, 1 - this.fear * 0.45);
+        show(b.mouth, this.fear > 0.5 || this.glad > 0.5 ? 0 : 1);
+        show(b.smile, this.glad > 0.5 ? 1 : 0);
+        show(b.gasp, this.fear > 0.5 ? 1 : 0);
         an.solve();
         // the squash is at the feet: the root's origin is the feet, so scaling it keeps them planted
         const q = this.squash * 0.16;

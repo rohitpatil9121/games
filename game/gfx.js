@@ -171,6 +171,29 @@ void main() {
 }
 `;
 
+/**
+ * Breakers: bands that roll toward the shore over the shallows. Depth stands in for distance from the
+ * beach, so the phase runs on depth; a band only exists between 0.15 and 2.4 m of water and is strongest
+ * just before it reaches the sand, where it rises, then spills (a sharp front, a long soft back).
+ */
+const breakers = /* glsl */ `
+float breakPhase(vec2 p, float depth, float t) {
+    float wobble = sin(p.x * 0.09 + p.y * 0.05) * 0.7 + sin(p.y * 0.13 - p.x * 0.04) * 0.5;
+    return depth * 1.25 + t * 0.55 + wobble;
+}
+float breaker(vec2 p, float depth, float t) {
+    float f = fract(breakPhase(p, depth, t));
+    float shape = smoothstep(0.0, 0.07, f) * (1.0 - smoothstep(0.07, 0.42, f));
+    float zone = smoothstep(0.12, 0.45, depth) * (1.0 - smoothstep(1.2, 2.4, depth));
+    return shape * zone;
+}
+float breakerTrail(vec2 p, float depth, float t) {
+    float f = fract(breakPhase(p, depth, t));
+    float zone = smoothstep(0.05, 0.3, depth) * (1.0 - smoothstep(1.0, 2.2, depth));
+    return (1.0 - smoothstep(0.07, 0.9, f)) * step(0.07, f) * zone;
+}
+`;
+
 const waterVertex = /* glsl */ `
 ${projectionChunk}
 attribute vec3 a_position;
@@ -178,8 +201,18 @@ uniform mat4 u_model;
 uniform float u_level;
 uniform float u_time;
 uniform float u_waves;
+uniform sampler2D u_height;
+uniform vec4 u_heightMap;
 varying vec3 v_world;
 varying vec2 v_slope;
+varying float v_crest;
+float floorAtV(vec2 xy) {
+    float n = u_heightMap.w;
+    vec2 f = clamp((xy - u_heightMap.xy) / u_heightMap.z, vec2(0.0), vec2(n - 1.0));
+    vec4 t = texture2D(u_height, (floor(f) + 0.5) / n);
+    return (t.r * 255.0 * 256.0 + t.g * 255.0) / 65535.0 * 32.0 - 16.0;
+}
+${breakers}
 // a few travelling waves; returns the height and its slope
 vec3 waves(vec2 p, float t) {
     vec3 r = vec3(0.0);
@@ -196,7 +229,10 @@ vec3 waves(vec2 p, float t) {
 void main() {
     vec4 world = u_model * vec4(a_position, 1.0);
     vec3 w = waves(world.xy, u_time) * u_waves;
-    world.z = u_level + w.x;
+    float depth = u_level - floorAtV(world.xy);
+    float crest = breaker(world.xy, depth, u_time);
+    v_crest = crest;
+    world.z = u_level + w.x + crest * 0.22 * u_waves;
     v_slope = w.yz;
     v_world = world.xyz;
     gl_Position = projectLab(world.xyz);
@@ -214,6 +250,8 @@ uniform float u_under;
 uniform float u_quality;      // 0 low (no foam noise, no glint), 1 high
 varying vec3 v_world;
 varying vec2 v_slope;
+varying float v_crest;
+${breakers}
 float decode(vec2 p) {
     vec4 t = texture2D(u_height, p);
     return (t.r * 255.0 * 256.0 + t.g * 255.0) / 65535.0 * 32.0 - 16.0;
@@ -250,12 +288,17 @@ void main() {
     vec3 color = mix(body, sky, fres * 0.85);
     float sun = pow(max(dot(reflect(-u_sunDirection, n), view), 0.0), 220.0) * 6.0 * u_quality + pow(max(dot(reflect(-u_sunDirection, n), view), 0.0), 18.0) * 0.18;
     color += u_sunColor * sun * labShadow(w, vec3(0.0, 0.0, 1.0));
+    // breakers rolling in over the shallows: a white crest with a ragged front and churned water behind it
+    float crest = max(v_crest, breaker(w.xy, depth, u_time));
+    float churn = breakerTrail(w.xy, depth, u_time) * u_quality;
+    float rag = smoothstep(0.3, 0.75, vnoise(w.xy * vec2(2.4, 1.1) + u_time * 0.5));
+    color = mix(color, vec3(0.97, 0.99, 1.0) * (0.75 + 0.35 * max(u_sunDirection.z, 0.0)), clamp(crest * (0.55 + 0.45 * rag) + churn * 0.35 * rag, 0.0, 0.92));
     // foam where the water is thin: at the shore and around anything standing in it
     float edge = 1.0 - smoothstep(0.0, 0.35 + 0.15 * sin(u_time * 1.3 + w.x * 0.3 + w.y * 0.2), depth);
     float foam = edge * mix(1.0, smoothstep(0.35, 0.65, vnoise(w.xy * 3.0 + vec2(u_time * 0.3, -u_time * 0.2))), u_quality);
     color = mix(color, vec3(0.95, 0.98, 1.0) * (0.6 + 0.4 * max(u_sunDirection.z, 0.0)), foam * 0.8);
     // clear in the shallows (the floor and its caustics show through), opaque in the deep
-    float alpha = clamp(0.32 + d * 0.75 + fres * 0.3 + foam * 0.6, 0.0, 0.96);
+    float alpha = clamp(0.32 + d * 0.75 + fres * 0.3 + foam * 0.6 + crest * 0.5, 0.0, 0.96);
     gl_FragColor = vec4(labFog(color, w), alpha);
 }
 `;

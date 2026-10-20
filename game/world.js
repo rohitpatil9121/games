@@ -3,7 +3,7 @@ import { groundAt, normalAt } from "./island.js";
 import { teamColor, ISLAND, TIDE, WATER } from "./data.js";
 import { MATCH_TICKS } from "./tide.js";
 import { terrainMaterial, stoneMaterial, waterMaterial, skyMaterial, setSea, dropSeaMaterials } from "./gfx.js";
-import { lootGeometry, palmParts, rockGeometry, campParts, kelpParts, rubbleParts, tuftParts, driftwoodParts, shellParts, part, merge } from "./models.js";
+import { lootGeometry, palmParts, rockGeometry, campParts, kelpParts, rubbleParts, tuftParts, driftwoodParts, shellParts, wrackParts, rowboatParts, flotsamParts, shrubParts, part, merge } from "./models.js";
 import { Raider, charactersReady } from "./characters.js";
 import { FLAG } from "./protocol.js";
 
@@ -177,6 +177,29 @@ export class World {
             else if (z > -0.5 && z <= 1.5) deco.push(...(rand() < 0.4 ? driftwoodParts(x, y, z, rand() * 10) : shellParts(x, y, z, rand() * 10)));
             else if (z < -0.5) deco.push(...shellParts(x, y, z, rand() * 10));
             else continue;
+            n++;
+        }
+        // the wrack line: what the sea leaves at its highest, all the way round, which also says "the water comes up to here"
+        for (let k = 0; k < 220; k++) {
+            const a = (k / 220) * Math.PI * 2 + rand() * 0.02;
+            let r = 50;
+            for (; r < 90; r += 0.5) if (groundAt(island, Math.cos(a) * r, Math.sin(a) * r) < TIDE.high + 0.05) break;
+            const x = Math.cos(a) * (r - 0.6 + rand() * 0.8), y = Math.sin(a) * (r - 0.6 + rand() * 0.8);
+            if (near(x, y, 1)) continue;
+            deco.push(...wrackParts(x, y, groundAt(island, x, y), rand() * 10));
+        }
+        // beached boats and washed-up crates and barrels between the wrack line and the low water, shrubs on the dunes
+        for (let n = 0, tries = 0; n < 14 && tries < 400; tries++) {
+            const a = rand() * Math.PI * 2, r = 56 + rand() * 16, x = Math.cos(a) * r, y = Math.sin(a) * r, z = groundAt(island, x, y);
+            if (near(x, y, 4) || z > TIDE.high + 0.5 || z < -1.5) continue;
+            deco.push(...(n % 3 === 0 ? rowboatParts(x, y, z, rand() * 10) : flotsamParts(x, y, z, rand() * 10)));
+            n++;
+        }
+        for (let n = 0, tries = 0; n < 60 && tries < 600; tries++) {
+            const a = rand() * Math.PI * 2, r = 30 + rand() * 25, x = Math.cos(a) * r, y = Math.sin(a) * r, z = groundAt(island, x, y);
+            if (near(x, y, 2) || z < TIDE.high + 0.8) continue;
+            deco.push(...shrubParts(x, y, z, rand() * 10));
+            for (let t = 0; t < 3; t++) deco.push(...tuftParts(x + (rand() - 0.5) * 3, y + (rand() - 0.5) * 3, groundAt(island, x, y), rand() * 100));
             n++;
         }
         // the dry rocks: a heap of boulders on each
