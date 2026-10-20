@@ -146,7 +146,9 @@ npm run test:net       # netcode under ping, jitter and loss; then the real serv
 npm run playtest       # a match played through real key presses in headless Chrome
 npm run bots           # headless bot matches: wins by camp, the flood's take, greed, skill
 npm run check          # island fairness for many seeds
-npm run models         # rebuild the raider
+npm run models         # the procedural raider (replaces the textured one)
+node tools/prepare-model.mjs <tripo.glb> <small.glb>   # a generated model to 10k faces, 1024 texture, shirt split
+node tools/make-raider-glb.mjs <small.glb>             # rig it with the game's skeleton and clips -> raider.glb
 npm run shots          # the marketing screenshots
 node tools/inspect.mjs <name> "<script>"   # pixel metrics and frame time for a view
 ```

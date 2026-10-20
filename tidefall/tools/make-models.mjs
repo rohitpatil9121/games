@@ -50,7 +50,7 @@
  *   celebrate banking: a crouch (anticipation), a hop with a fist up, a hold at the top, a squash on landing,
  *             a settle
  */
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { mkdirSync } from "node:fs";
 import { Builder, loft, sphere, box, roundedBox, cylinder, torus, pal, skeleton, clip, writeGLB } from "./modelkit.mjs";
 
@@ -59,7 +59,7 @@ mkdirSync(OUT, { recursive: true });
 const sin = Math.sin, cos = Math.cos, PI = Math.PI, TAU = PI * 2;
 const TEAM = 0, SKIN = 1, HAIR = 2, CANVAS = 3, HAT = 4, LEATHER = 5, WHITE = 6, INK = 7;
 
-const J = skeleton([
+export const J = skeleton([
     { name: "hips", parent: null, at: [0, 0, 0.9] },
     { name: "spine", parent: "hips", at: [0, 0, 1.03] },
     { name: "chest", parent: "spine", at: [0, 0, 1.2] },
@@ -218,7 +218,7 @@ const span = (u, a, b) => smooth((u - a) / (b - a));
 /** a value that goes from 0 up to 1 over [a, b] and back to 0 over [b, c] (an accent) */
 const bump = (u, a, b, c) => (u < b ? span(u, a, b) : 1 - span(u, b, c));
 
-function clips() {
+export function clips() {
     // limbs hang down: +rx swings them forward. Spine, chest, head point up: −rx leans them forward.
     // arms: +rz on the right arm lifts it out to the side; on the left arm the same lift is −rz (mirror).
     const arms = (swing, out = 0.1, bend = 0.3) => ({ armL: [-swing, 0, -out], armR: [swing, 0, out], foreL: [Math.max(0, swing) * 0.7 + bend, 0, 0], foreR: [Math.max(0, -swing) * 0.7 + bend, 0, 0] });
@@ -323,5 +323,8 @@ function clips() {
     ];
 }
 
-const r = writeGLB(OUT + "raider.glb", raider());
-console.log(`${r.path.split(/[\\/]/).pop()}: ${r.meshes} mesh, ${r.triangles} triangles, ${(r.bytes / 1024).toFixed(0)} KB`);
+// run as a script: write the model. (tools/make-raider-glb.mjs imports the skeleton and clips from here.)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    const r = writeGLB(OUT + "raider.glb", raider());
+    console.log(`${r.path.split(/[\\/]/).pop()}: ${r.meshes} mesh, ${r.triangles} triangles, ${(r.bytes / 1024).toFixed(0)} KB`);
+}

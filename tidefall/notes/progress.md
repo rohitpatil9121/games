@@ -308,3 +308,36 @@ Scorecard: World 2 → 3 (layered beach: wrack line, boats, flotsam, shrubs, cra
 Hero 3, Rivals 2 → 3 (crimson and the pennant read at 30 m on every side), VFX/motion 2. Average 2.2 → 2.4,
 over the 2.3 premium line on these measures. Still judged only from stills: the motion has not been seen
 by a person.
+
+## The Tripo raider (2026-10-21)
+
+The user made a raider in Tripo (image to 3D): 1,958,895 triangles, one 7 MB texture, T-pose, no rig.
+Blender was not installed, so the whole pipeline is Node plus the headless Chrome the tests already use:
+
+- `tools/prepare-model.mjs <in.glb> <out.glb> [--faces 10000] [--texture 1024] [--shirt-hue h]`: welds
+  duplicates, then quadric-error half-edge collapse to 10,000 triangles (82 s for this model). Every vertex
+  keeps its original UV; a vertex on a UV seam may only slide along the seam, boundaries along themselves,
+  no flips, link condition kept. Chrome shrinks the texture to 1024² JPEG (197 KB), finds the shirt by the
+  commonest saturated hue on the chest's front (teal, 0.54; the first try over the whole torso picked the
+  sack's tan), greys those texels and splits those faces (1,050) into a "shirt" material.
+- `tools/make-raider-glb.mjs <prepared.glb> [--face +x]`: Y-up to Z-up facing +Y, 1.88 m tall; landmarks
+  from the shape (hand tips, armpits where the body under the arm ends, the crotch, the legs; shoulders
+  mirrored from the narrower side, because the hook on one hip widened the other); arms lowered 72° from
+  the T-pose with a smooth blend at the shoulder; weights by region and by bands at each joint; the sack on
+  the `pack` bone; a procedural team pennant on the `flag` bone. The game's skeleton (18 of the 31 joints:
+  no hats, hair or face bones) and all 15 clips from `tools/make-models.mjs`. Out: body, shirt, pennant,
+  10,100 triangles, 874 KB.
+- `game/characters.js` takes either kind of raider.glb. Textured: the shirt is the grey texture times the
+  team colour (per-raider `u_color`), the face is painted (no blinks or expressions), every raider looks the
+  same apart from the team colour. `npm run models` brings the procedural raider back.
+
+Performance: the first measure was 8.6 to 18.7 ms a frame against 1 to 2 ms for the procedural raider, in
+the camp view with the crew in sight. Hiding parts in one page showed any one skinned part cost ~15 ms;
+the cause was the uniform-array skinning path (forcing the joint texture: 1.3 to 2.5 ms). The textured
+raider now uses the joint texture: 0.4 to 1.9 ms median against 0.4 to 1.5 for the procedural one,
+alternating runs on Intel UHD. `npm test` 26/26, `npm run playtest` 5/5, no console errors.
+
+Evidence: `artifacts/tripo-*.jpg` (front, right, back, left, crew, far), `artifacts/tripo-poses.jpg` (16
+poses; the old ones are in `artifacts/pose-procedural/`). Seen: arms hang naturally, run and celebrate
+read. Not right yet: the sack's top corner stretches a little in the run (its weights blend into the
+chest); the pennant pole floats a hand's width off the sack. Not seen by a person in motion.

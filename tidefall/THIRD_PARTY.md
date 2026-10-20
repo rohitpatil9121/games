@@ -24,7 +24,12 @@ adapted from BREACH.
 
 ## Art and sound
 
-Everything visible is generated: the raider by `tools/make-models.mjs` (`assets/models/raider.glb`), the
+The raider (`assets/models/raider.glb`) is a model the author generated with Tripo (https://www.tripo3d.ai,
+image to 3D), reduced, rigged and animated here by `tools/prepare-model.mjs` and `tools/make-raider-glb.mjs`.
+Commercial use depends on the Tripo plan it was made on: the author has to check that. `npm run models`
+writes the earlier fully procedural raider instead.
+
+Everything else visible is generated: the
 island by `game/island.js`, props by `game/models.js`, surfaces, water and sky by the shaders in `game/gfx.js`.
 
 Ten sound effects in `assets/sounds/` are from Kenney's Interface Sounds, Impact Sounds and Digital Audio

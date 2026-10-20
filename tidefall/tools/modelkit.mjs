@@ -305,6 +305,7 @@ export function writeGLB(path, model) {
         json.skins = [{ joints: sk.joints.map((_, i) => i), inverseBindMatrices: acc(ibm, "MAT4", 5126, sk.joints.length) }];
     }
 
+    const images = [];
     for (const b of model.meshes) {
         const n = b.pos.length / 3, pos = new Float32Array(n * 3), nrm = new Float32Array(n * 3);
         const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
@@ -318,12 +319,27 @@ export function writeGLB(path, model) {
             NORMAL: acc(nrm, "VEC3", 5126, n, {}, 34962),
             COLOR_0: acc(new Float32Array(b.col), "VEC4", 5126, n, {}, 34962),
         };
+        if (b.uv) attributes.TEXCOORD_0 = acc(new Float32Array(b.uv), "VEC2", 5126, n, {}, 34962);
+        // a textured mesh gets a material of its own pointing at its image (JPEG or PNG bytes)
+        let material = 0;
+        if (b.image) {
+            json.images ||= []; json.textures ||= []; json.samplers ||= [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }];
+            let ti = images.indexOf(b.image);
+            if (ti < 0) {
+                json.images.push({ bufferView: push(b.image), mimeType: b.mime || "image/jpeg" });
+                json.textures.push({ sampler: 0, source: json.images.length - 1 });
+                images.push(b.image);
+                ti = json.images.length - 1;
+            }
+            json.materials.push({ name: b.name, pbrMetallicRoughness: { baseColorTexture: { index: ti }, baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 } });
+            material = json.materials.length - 1;
+        }
         if (sk && b.skinned) {
             attributes.JOINTS_0 = acc(new Uint8Array(b.jnt), "VEC4", 5121, n, {}, 34962);
             attributes.WEIGHTS_0 = acc(new Float32Array(b.wgt), "VEC4", 5126, n, {}, 34962);
         }
         const indices = n > 65535 ? acc(new Uint32Array(b.idx), "SCALAR", 5125, b.idx.length, {}, 34963) : acc(new Uint16Array(b.idx), "SCALAR", 5123, b.idx.length, {}, 34963);
-        json.meshes.push({ name: b.name, primitives: [{ attributes, indices, material: 0 }] });
+        json.meshes.push({ name: b.name, primitives: [{ attributes, indices, material }] });
         json.nodes.push({ name: b.name, mesh: json.meshes.length - 1, ...(sk && b.skinned ? { skin: 0 } : {}) });
         json.scenes[0].nodes.push(json.nodes.length - 1);
     }
