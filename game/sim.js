@@ -102,6 +102,8 @@ export function createPlayer(id, name = "Player") {
         shoveCool: 0, flareCool: 0,
         /** ticks of being knocked off balance (no control) and of being dazzled by a flare */
         stun: 0, blind: 0,
+        /** ticks during which shoves don't land (after being shoved): no stun-locking a carrier */
+        guard: 0,
         respawn: 0,
         /** set by stepPlayer for step() to resolve this tick */
         shoved: false, flared: false, wantPick: false, wantDrop: false, gasp: false, mantled: false, hookFired: 0, jumped: false,
@@ -146,7 +148,7 @@ export function spawnPlayer(state, island, p) {
     p.ground = false; p.water = 0; p.alive = true;
     p.breath = WATER.breath * TICK_RATE;
     p.carry = []; p.weight = 0;
-    p.hook = 0; p.hookCool = 0; p.stun = 0; p.blind = 0; p.respawn = 0;
+    p.hook = 0; p.hookCool = 0; p.stun = 0; p.blind = 0; p.guard = 0; p.respawn = 0;
     p.air = 0; p.jumpAge = 99; p.pickAge = 99;
     for (let i = 0; i < HISTORY; i++) { p.hist[i * 3] = p.x; p.hist[i * 3 + 1] = p.y; p.hist[i * 3 + 2] = p.z; }
     state.events.push({ type: "spawn", id: p.id });
@@ -285,6 +287,7 @@ export function stepPlayer(island, p, input, level) {
     if (p.shoveCool > 0) p.shoveCool--;
     if (p.flareCool > 0) p.flareCool--;
     if (p.blind > 0) p.blind--;
+    if (p.guard > 0) p.guard--;
     if (pressed & BTN.jump) p.jumpAge = 0; else if (p.jumpAge < 99) p.jumpAge++;
 
     gather(island, p.x, p.y, R + 2);
@@ -562,7 +565,7 @@ function shove(state, island, p, lag) {
     const T = TOOLS.shove, yaw = yawOf(p.yaw), dx = dcos(yaw), dy = dsin(yaw);
     let target = null, best = Infinity;
     for (const q of state.players) {
-        if (q === p || !q.alive || q.team === p.team) continue;
+        if (q === p || !q.alive || q.team === p.team || q.guard > 0) continue;
         const at = positionAt(state, q, lag), ox = at.x - p.x, oy = at.y - p.y, oz = at.z - p.z, d = Math.sqrt(ox * ox + oy * oy);
         if (d > T.range || Math.abs(oz) > 1.6) continue;
         if (d > 0.3 && (ox * dx + oy * dy) / d < T.cone) continue;
@@ -576,6 +579,7 @@ function shove(state, island, p, lag) {
     target.vx = dx * T.knock * (behind ? 1.25 : 1); target.vy = dy * T.knock * (behind ? 1.25 : 1); target.vz = Math.max(target.vz, T.lift);
     target.ground = false; target.hook = 0;
     target.stun = Math.round((behind ? T.behindStun : T.stun) * TICK_RATE);
+    target.guard = Math.round(T.guard * TICK_RATE);
     p.shoves++;
     for (let n = behind ? 2 : 1; n > 0 && target.carry.length; n--) {
         const id = target.carry[target.carry.length - 1], item = findLoot(state, id);

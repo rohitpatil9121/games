@@ -42,6 +42,10 @@ const REACTION = [0, 36, 21, 12];               // ticks between decisions, by s
 const JUDGEMENT = [0, 0.35, 0.15, 0.05];         // how far wrong its sense of the flood can be
 const SHOVE_DELAY = [0, 24, 12, 5];              // ticks it takes to notice someone in reach
 const FIELD_EVERY = 120;                          // ticks between refreshing a travel field
+/** new travel fields allowed per tick across every bot (each is ~4 ms); past it, bots keep an old field a tick longer */
+const FIELD_BUDGET = 1;
+const budget = { tick: -1, used: 0 };
+function spend(state) { if (budget.tick !== state.tick) { budget.tick = state.tick; budget.used = 0; } if (budget.used >= FIELD_BUDGET) return false; budget.used++; return true; }
 
 /** Response curves: map a fact into 0..1. */
 const curve = {
@@ -55,8 +59,8 @@ export function createBrain(p, skill, seed) {
     const rand = makeRandom(seed >>> 0);
     return {
         id: p.id, skill: Math.max(1, Math.min(3, skill | 0)), rand,
-        /** a personality: 0.75 careful .. 1.35 greedy */
-        greed: 0.75 + rand() * 0.6,
+        /** a personality: 0.7 careful .. 1.6 greedy */
+        greed: 0.7 + rand() * 0.9,
         seq: 0, wait: Math.floor(rand() * 20),
         intent: "rest", target: null, goal: null,
         field: null, fieldGoal: -1, fieldAt: -9999,
@@ -81,6 +85,7 @@ function secondsUntilDeep(seed, tick, z) {
 /** A travel field toward a goal node, kept while the goal stays and the water hasn't moved much. */
 function fieldTo(brain, nav, goal, state) {
     if (brain.field && brain.fieldGoal === goal && state.tick - brain.fieldAt < FIELD_EVERY) return brain.field;
+    if (!spend(state)) return brain.fieldGoal === goal ? brain.field : null;
     const level = waterAt(state.seed, state.tick + 120);       // where the water will be in two seconds
     brain.field = travelField(nav, [goal], level, { out: brain.field || undefined });
     brain.fieldGoal = goal; brain.fieldAt = state.tick;
@@ -90,7 +95,7 @@ function fieldTo(brain, nav, goal, state) {
 function homeField(state, island, team) {
     const cache = island._home || (island._home = []);
     const c = cache[team];
-    if (c && state.tick - c.at < FIELD_EVERY) return c.field;
+    if (c && (state.tick - c.at < FIELD_EVERY || !spend(state))) return c.field;
     const nav = navOf(island), camp = island.camps[team];
     const level = waterAt(state.seed, state.tick + 300);
     const field = travelField(nav, [nodeAt(nav, camp.x, camp.y)], level, { out: c ? c.field : undefined });
@@ -123,7 +128,8 @@ function decide(state, island, bot, brain) {
     if (bot.carry.length) {
         const fill = bot.weight / CARRY.maxWeight;
         const deepIn = secondsUntilDeep(state.seed, state.tick, bot.z) * misjudge;
-        const urgency = curve.smooth(1 - (deepIn - homeSecs) / 25);
+        // a greedy bot believes it has more time than it has, on the way home too
+        const urgency = curve.smooth(1 - (deepIn * brain.greed - homeSecs) / 25);
         const enough = curve.smooth(fill / (0.35 + 0.45 * brain.greed));
         consider("home", 0.15 + 0.85 * Math.max(enough, urgency, tide.phase >= PHASE.flood ? 1 : 0) * (0.5 + 0.5 * curve.linear(carried / 150)), camp);
     }
@@ -150,7 +156,8 @@ function decide(state, island, bot, brain) {
             // something underwater now is harder to get (and heavy things sink you)
             const depth = waterAt(state.seed, state.tick) - l.z;
             const reach = depth > 2.4 ? 0.1 : depth > WATER.swimDepth && weightOf(l.kind) > WATER.swimCapacity - bot.weight ? 0.4 : 1;
-            consider("loot", (0.25 + 0.75 * value) * (0.3 + 0.7 * near) * safe * reach, l);
+            // a greedy bot cares more about how much a thing is worth (and less about the cheap and near)
+            consider("loot", Math.pow(0.25 + 0.75 * value, 0.6 + brain.greed) * (0.3 + 0.7 * near) * safe * reach, l);
         }
         if (!checked && tide.phase === PHASE.ebb) consider("rest", 0.12, null);
     }
@@ -187,7 +194,7 @@ function steer(state, island, bot, brain, gx, gy) {
     if (d > 3.5) {
         const field = fieldTo(brain, nav, goal, state);
         let k = nodeAt(nav, bot.x, bot.y);
-        if (Number.isFinite(field[k])) {
+        if (field && Number.isFinite(field[k])) {
             for (let i = 0; i < 3; i++) { const n = downhill(nav, field, k); if (n === k) break; k = n; }
             tx = nodeX(nav, k); ty = nodeY(nav, k);
         }
@@ -229,7 +236,7 @@ export function think(state, island, bot, brain) {
     // shove: a rival with loot in reach in front of me (or anyone in my way when I'm stealing)
     let shoveTarget = null;
     for (const q of state.players) {
-        if (q.team === bot.team || !q.alive) continue;
+        if (q.team === bot.team || !q.alive || q.guard > 0) continue;
         const d = Math.hypot(q.x - bot.x, q.y - bot.y);
         if (d > TOOLS.shove.range * 0.9 || Math.abs(q.z - bot.z) > 1.4) continue;
         if (!q.carry.length && brain.intent !== "defend") continue;

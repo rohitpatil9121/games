@@ -22,7 +22,7 @@ const SKILLS = [1, 2, 3, 2];
 const byCamp = Array.from({ length: TEAMS }, () => ({ wins: 0, bank: 0 }));
 const bySkill = new Map();
 const bots = [];
-let lost = 0, gasps = 0, drowns = 0, banked = 0, draws = 0, ticks = 0, tickMs = 0, worstTick = 0, steals = 0, shoves = 0;
+let slow = 0, lost = 0, gasps = 0, drowns = 0, banked = 0, draws = 0, ticks = 0, tickMs = 0, worstTick = 0, steals = 0, shoves = 0;
 
 for (let m = 0; m < MATCHES; m++) {
     const room = new Room({ code: "BOTS", teams: TEAMS, bots: TEAMS * PER, skill: 2, seed: 1000 + m * 7919 });
@@ -33,7 +33,8 @@ for (let m = 0; m < MATCHES; m++) {
         const t0 = performance.now();
         room.tick();
         const ms = performance.now() - t0;
-        tickMs += ms; ticks++; if (ms > worstTick) worstTick = ms;
+        // the tick that starts the next match (generating and checking a new island) is not a play tick
+        if (room.state === state0) { tickMs += ms; ticks++; if (ms > worstTick) worstTick = ms; if (ms > 16) slow++; }
         for (const e of state0.events) { if (e.type === "drop" && e.why === "gasp") gaspN++; if (e.type === "drown") drownN++; }
     }
     const s = state0;
@@ -69,4 +70,4 @@ for (const [name, list] of [["careful", bots.slice(0, third)], ["middle", bots.s
 }
 console.log(`\nSkill:`);
 for (const [skill, k] of [...bySkill].sort((a, b) => a[0] - b[0])) console.log(`  ${["", "easy", "normal", "hard"][skill].padEnd(7)} banked ${(k.banked / k.n).toFixed(0).padStart(4)}  lost ${(k.lost / k.n).toFixed(0).padStart(4)}  on the winning team ${pct(k.wins, k.n)}`);
-console.log(`\nTick time with ${TEAMS * PER} bots: ${(tickMs / ticks).toFixed(3)} ms average, ${worstTick.toFixed(1)} ms worst (${ticks} ticks, ${((ticks / TICK_RATE) / 60).toFixed(0)} minutes of play).`);
+console.log(`\nTick time with ${TEAMS * PER} bots: ${(tickMs / ticks).toFixed(3)} ms average, ${worstTick.toFixed(1)} ms worst, ${slow} ticks over 16 ms (${ticks} ticks, ${((ticks / TICK_RATE) / 60).toFixed(0)} minutes of play).`);

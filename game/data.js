@@ -146,7 +146,7 @@ export const CARRY = Object.freeze({
 
 export const TOOLS = Object.freeze({
     grapple: { range: 30, speed: 19, cooldown: 3.5, maxTicks: 95, release: 1.4 },
-    shove: { range: 2.1, cone: 0.45, cooldown: 1.2, knock: 7, lift: 3.2, stun: 0.45, behindStun: 1.0, behindDot: 0.35 },
+    shove: { range: 2.1, cone: 0.45, cooldown: 1.2, knock: 7, lift: 3.2, stun: 0.45, behindStun: 1.0, behindDot: 0.35, guard: 2.5 },
     flare: { range: 40, cooldown: 9, blindRadius: 9, blind: 2.4, mark: 12 },
 });
 
