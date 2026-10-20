@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TIDEFALL</title>
+<meta name="description" content="TIDEFALL: raid the ruins the sea gives up at low tide, and race the flood back to camp. A multiplayer browser game on the Projection Lab engine.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230d4a5e'/%3E%3Cpath d='M3 20c4-4 7-4 10 0s6 4 10 0 6-4 6-4v12H3z' fill='%23e8d6a8'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view" tabindex="0" aria-label="The game view"></canvas>
+
+<section id="title" class="screen" aria-labelledby="title-h">
+  <div class="panel">
+    <h1 id="title-h">TIDEFALL</h1>
+    <p class="tag">The sea goes out. The ruins come up. Get back before it returns.</p>
+    <label class="field">Your name <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player"></label>
+    <fieldset class="row">
+      <legend>Practice against bots, or create a room</legend>
+      <label>Teams <select id="p-teams"><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+      <label>Players <select id="p-bots"></select></label>
+      <label>Bots <select id="p-skill"><option value="1">Easy</option><option value="2">Normal</option><option value="3">Hard</option></select></label>
+    </fieldset>
+    <div class="buttons">
+      <button id="practice" class="primary">Practice</button>
+      <button id="quick">Quick play</button>
+      <button id="create">Create a room</button>
+      <button id="open-settings">Settings</button>
+    </div>
+    <form id="join-form" class="row">
+      <input id="code" maxlength="4" placeholder="Code" aria-label="Room code" autocomplete="off" spellcheck="false">
+      <button id="join" type="submit">Join</button>
+    </form>
+    <p id="server-status" class="small" role="status">Looking for a server…</p>
+  </div>
+</section>
+
+<section id="pause" class="screen" hidden aria-labelledby="pause-h">
+  <div class="panel">
+    <h2 id="pause-h">Paused <span class="small">(the tide doesn't wait)</span></h2>
+    <p id="room-line" class="small">Room <b id="room-code"></b> <button id="invite" class="link">Copy invite link</button></p>
+    <div class="buttons"><button id="resume" class="primary">Resume</button><button id="open-settings-2">Settings</button><button id="leave">Leave</button></div>
+    <details id="nettest">
+      <summary>Network test: add lag to your own link</summary>
+      <label>Ping <input id="net-latency" type="range" min="0" max="400" step="10" value="0"> <output id="net-latency-out"></output></label>
+      <label>Jitter <input id="net-jitter" type="range" min="0" max="100" step="5" value="0"> <output id="net-jitter-out"></output></label>
+      <label>Loss <input id="net-loss" type="range" min="0" max="10" step="1" value="0"> <output id="net-loss-out"></output></label>
+    </details>
+  </div>
+</section>
+
+<section id="settings" class="screen" hidden aria-labelledby="settings-h">
+  <div class="panel wide">
+    <h2 id="settings-h">Settings</h2>
+    <div class="cols">
+      <fieldset>
+        <legend>Controls</legend>
+        <label class="line">Mouse sensitivity <input id="s-sensitivity" type="range" min="0.2" max="3" step="0.05"> <output id="s-sensitivity-out"></output></label>
+        <label class="line"><input id="s-invert" type="checkbox"> Invert look up and down</label>
+        <label class="line">Field of view <input id="s-fov" type="range" min="55" max="100" step="1"> <output id="s-fov-out"></output></label>
+      </fieldset>
+      <fieldset>
+        <legend>Picture</legend>
+        <label class="line">Quality <select id="s-quality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+        <label class="line">Water <select id="s-water"><option value="low">Simple</option><option value="high">Detailed</option></select></label>
+        <label class="line"><input id="s-shadows" type="checkbox"> Shadows</label>
+        <label class="line"><input id="s-bloom" type="checkbox"> Bloom</label>
+      </fieldset>
+      <fieldset>
+        <legend>Sound</legend>
+        <label class="line">Volume <input id="s-volume" type="range" min="0" max="1" step="0.05"> <output id="s-volume-out"></output></label>
+        <label class="line">Music <input id="s-music" type="range" min="0" max="1" step="0.05"> <output id="s-music-out"></output></label>
+        <label class="line">Effects <input id="s-sfx" type="range" min="0" max="1" step="0.05"> <output id="s-sfx-out"></output></label>
+        <label class="line"><input id="s-captions" type="checkbox"> Captions for important sounds</label>
+      </fieldset>
+      <fieldset>
+        <legend>Accessibility</legend>
+        <label class="line">Reduce motion <select id="s-motion"><option value="system">As the system says</option><option value="on">On</option><option value="off">Off</option></select></label>
+        <label class="line">Team colours <select id="s-scheme"></select></label>
+        <label class="line">Text size <select id="s-text"><option value="1">Normal</option><option value="1.15">Large</option><option value="1.3">Larger</option></select></label>
+        <label class="line"><input id="s-assist" type="checkbox"> Assist: 50% more breath (shown on the scoreboard)</label>
+      </fieldset>
+    </div>
+    <fieldset>
+      <legend>Keys and buttons <button id="bindings-reset" class="link">Reset all</button></legend>
+      <div id="bindings" class="bindings"></div>
+    </fieldset>
+    <div class="buttons"><button id="settings-back" class="primary">Back</button></div>
+  </div>
+</section>
+
+<div id="hud" hidden>
+  <div id="markers" aria-hidden="true"></div>
+  <div id="blind" aria-hidden="true"></div>
+  <div id="flood-warn" aria-hidden="true"></div>
+  <header id="tide" aria-label="Tide">
+    <div id="tide-pips" aria-hidden="true"></div>
+    <div id="tide-line"><span id="tide-phase"></span> <span id="tide-time"></span></div>
+    <div id="tide-track"><div id="tide-bar"></div><b id="tide-mark"></b></div>
+    <div id="tide-trend"></div>
+  </header>
+  <ol id="banks" aria-label="Banked by each team"></ol>
+  <ol id="feed" aria-live="polite"></ol>
+  <div id="crosshair"></div>
+  <div id="prompt" role="status"></div>
+  <div id="notice" role="status"></div>
+  <div id="caption" aria-live="assertive"></div>
+  <div id="tip" role="note" aria-live="polite"></div>
+  <div id="breath" aria-label="Breath"><i id="breath-fill"></i></div>
+  <div id="compass"><b id="compass-arrow">&#9650;</b> <span id="compass-text"></span></div>
+  <section id="carry" aria-label="What you carry">
+    <div id="carry-items"></div>
+    <div id="carry-bar"><i id="carry-fill"></i></div>
+    <div id="carry-label"></div>
+  </section>
+  <section id="scores" aria-label="Scores">
+    <h2 id="scores-title"></h2><p id="scores-sub"></p>
+    <table><thead><tr><th>Player</th><th></th><th>Banked</th><th>Lost to sea</th><th>Steals</th><th>Shoves</th><th>Ping</th></tr></thead><tbody id="scores-body"></tbody></table>
+  </section>
+  <form id="chat-form" hidden><input id="chat-input" maxlength="120" placeholder="Say something" aria-label="Chat" autocomplete="off"></form>
+  <pre id="debug" hidden></pre>
+</div>
+<script type="module" src="game/main.js"></script>
+</body>
+</html>

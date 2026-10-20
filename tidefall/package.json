@@ -1,0 +1,21 @@
+{
+  "name": "tidefall",
+  "private": true,
+  "type": "module",
+  "description": "TIDEFALL: a multiplayer tide-raid game built on Projection Lab",
+  "scripts": {
+    "start": "node server/server.mjs",
+    "static": "node tools/serve.mjs",
+    "check": "node tools/check-island.mjs",
+    "test": "node tools/test.mjs && node tools/check-island.mjs",
+    "test:net": "node tools/net-test.mjs",
+    "bots": "node tools/bot-match.mjs",
+    "models": "node tools/make-models.mjs",
+    "playtest": "node tools/playtest.mjs",
+    "shots": "node tools/shots.mjs",
+    "inspect": "node tools/inspect.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}
