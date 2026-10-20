@@ -245,3 +245,43 @@ Balance (`npm run bots`), and three bugs it found:
   separate; they only change reaction time and how well a bot judges the flood. Open issue.
 - Server tick with 8 bots, run alone: 0.35 ms average, 14.4 ms worst, none over 16 ms. (Runs that shared
   the machine with others showed worst ticks of 0.2 to 0.9 s: that was the machine, not the game.)
+
+## Character pass (after stage 9)
+
+Skills: `img2threejs` (its character guides: the layer ontology, single-bone rigid parts, hair rigidly
+parented and never crossing a joint, mirrored pairs, a turntable rather than one frame; not its Python
+image pipeline, which needs a reference image and emits three.js TypeScript), `disney-animation-rule-skill`
+(event poses, uneven phase timing, overlap, squash at contact, secondary action derived from the primary
+motion), `game-ai` (a three-state machine for crabs). Not used: `scenario-blender-rigging` and
+`scenario-blender-animation` (the Blender MCP did not answer: Blender isn't running), `meshy-3d-generation`
+(no MESHY_API_KEY).
+
+The raider (`tools/make-models.mjs`, `game/characters.js`):
+- six-head stylised proportions; a face (eyes with pupils, brows, nose, a grin), ears, big hands and feet;
+- variety by bone scale on one shared mesh: three hats (straw sun hat, bandana, captain's cap), three
+  hairstyles (crop, ponytail, long) or none, a beard; six skin tones, six hair colours, hat colours;
+- team readability: shirt, scarf, sack band and a pennant on a pole above the hat line, which shows from
+  every side and at 30 m (before, a raider at 30 m was a pale speck);
+- the loot sack on the back grows with the weight carried; carried loot rides on top of it;
+- clips: idle, walk, run, carry (heavy), wade, swim, tread, jump, fall, shove, hookThrow, hook, stagger,
+  drown, celebrate; one-shots on events (shove, grapple, banking, drowning);
+- secondary motion: lean into acceleration, bank into turns, a squash at the feet on hard landings, the
+  pennant flapping with speed, a ponytail spring.
+- 7,424 triangles (was 2,908), 469 KB (was 219 KB).
+
+Cosmetic creatures (`game/critters.js`, client only, no gameplay effect): crabs that follow the water's
+edge in and out, scuttle away from players within 4 m and dig in when the sea covers them; gulls circling
+high with beat-and-glide wings and an occasional call. Proposed, not added (they change what players know
+or do): gulls landing on exposed loot as a tell; an old keeper at each chest who points to the nearest loot.
+
+Measured (`tools/inspect.mjs`, camp view, 8 players, 1280×720, Intel UHD): before 0.7 ms median / 6.8 ms
+worst, 84 draws, 198 k triangles; after 1.3 and 1.6 ms median / 7.4 and 8.5 worst, 88 draws, 228 to 232 k
+triangles. Earlier runs of the before view measured 0.7 and 1.6 ms, so the cost is within this measure's
+noise, at most about +0.9 ms. Evidence: `artifacts/before-*.jpg`, `artifacts/after-*.jpg` (front, right,
+back, left, crew, 30 m), `artifacts/pose-*.jpg` (16 poses), `artifacts/crabs.jpg`. `npm test` 26/26 and
+`npm run playtest` 5/5 after the change, no console errors.
+
+Scorecard, character rows: Hero/player 2 → 3 (layered model: hats, hair, sack, pennant; expressive
+one-shots and secondary motion); Rivals readable at a distance 2 → 2 (better, by the pennant, but the
+coral team is close to the skin tones); VFX/motion 2 → 2. Average 2.1 → 2.2; premium needs 2.3.
+Not done: facial animation (blinks, expressions), and motion has only been judged from stills.

@@ -9,6 +9,7 @@ import { PROTOCOL, NAME_MAX, cleanText } from "./protocol.js";
 import { World } from "./world.js";
 import { loadCharacters } from "./characters.js";
 import { Sound } from "./sound.js";
+import { Critters } from "./critters.js";
 import { Tutorial } from "./tutorial.js";
 import { load as loadSave, store as storeSave } from "./save.js";
 import { Controls, defaultBindings, keyHint, ACTIONS, describe } from "./controls.js";
@@ -47,10 +48,12 @@ const controls = new Controls(input, canvas, settings);
 const view = controls.view;
 const rig = new ThirdPerson(camera);
 const hud = new Hud(client);
+const critters = new Critters(game.scene);
 const tutorial = new Tutorial(save.tutorial, (text, seconds) => hud.tip(text, seconds));
 const keyName = (id) => (id === "move" ? ["forward", "left", "back", "right"].map((a) => keyHint(settings.bindings, a)).join("") : keyHint(settings.bindings, id)) || id;
 const sound = new Sound({ volume: settings.volume });
 sound.onCaption = (text, seconds) => hud.caption(text, seconds);
+critters.onCall = (x, y, z) => sound.at("gull", x, y, z, 0.5);
 // browsers allow sound only after a click or a key press
 for (const type of ["pointerdown", "keydown"]) addEventListener(type, () => sound.start(), { once: true });
 // every button clicks
@@ -289,6 +292,7 @@ function notice(text, seconds = 3) { hud.notice(text, seconds); }
 
 client.on("welcome", () => {
     world.loadIsland(client.island);
+    critters.setIsland(client.island);
     const practice = client.room.code === "PRACTICE";
     if (!practice) { history.replaceState(null, "", location.pathname + location.search + "#" + client.room.code); $("code").value = client.room.code; }
     notice(practice ? "Practice" : `Room ${client.room.code}`, 3);
@@ -298,7 +302,7 @@ client.on("welcome", () => {
     const camp = client.island.camps[client.me.team] || client.island.camps[0];
     view.yaw = camp.angle; view.pitch = -0.2;
 });
-client.on("start", () => { world.loadIsland(client.island); flares.length = 0; notice("A new island", 3); });
+client.on("start", () => { world.loadIsland(client.island); critters.setIsland(client.island); flares.length = 0; notice("A new island", 3); });
 client.on("close", (reason) => {
     const was = client.room && client.room.code !== "PRACTICE" ? client.room.code : online.last && online.last.room;
     toTitle();
@@ -309,7 +313,7 @@ client.on("event", onEvent);
 // my own jump and grapple sound the moment they happen, not when the server agrees
 client.on("predicted", (e) => {
     if (e.type === "jump") sound.play("jump", 0.6);
-    else if (e.type === "hook") { sound.play(e.hit ? "hook" : "miss", 0.8); if (e.hit) setTimeout(() => sound.at("clank", e.x, e.y, e.z, 0.8), 120); }
+    else if (e.type === "hook") { world.act(client.id, "hookThrow"); sound.play(e.hit ? "hook" : "miss", 0.8); if (e.hit) setTimeout(() => sound.at("clank", e.x, e.y, e.z, 0.8), 120); }
 });
 
 /** flares burning, as this client was told: { id, team, x, y, z, until } */
@@ -357,6 +361,7 @@ function onEvent(e) {
             const c = island.camps[e.team];
             world.glint(c.x, c.y, c.z + 1, teamColor(e.team), 60);
             hud.feed(`${hud.who(e.id)} banked <b>${e.value}</b>`, e.team);
+            world.act(e.id, "celebrate");
             if (mine) { game.juice.shake(0.12); notice(`Banked ${e.value}`, 2); sound.play("bank", 0.9); sound.play("coins", 0.6, 0.9); }
             else sound.at("bank", c.x, c.y, c.z + 1, 0.8);
             break;
@@ -368,6 +373,7 @@ function onEvent(e) {
             if (e.why === "gasp") { if (mine) { game.juice.shake(0.25); notice("Out of breath: the heavy loot sinks", 3); } else hud.feed(`${hud.who(e.id)} lost loot to the sea`, team(e.id)); }
             break;
         case "drown":
+            world.act(e.id, "drown");
             if (mine) { notice("Drowned. Back to camp", 3); sound.play("drown", 0.8); } else hud.feed(`${hud.who(e.id)} drowned`, team(e.id));
             break;
         case "shove":
@@ -390,6 +396,7 @@ function onEvent(e) {
             if (e.id === me.id) { game.juice.shake(0.2); sound.play("blind", 0.7); }
             break;
         case "hook":
+            if (!mine) world.act(e.id, "hookThrow");
             if (!mine && whereIs(e.id, spot)) { sound.at("hook", spot.x, spot.y, spot.z + 1.5, 0.7); if (e.hit) sound.at("clank", e.x, e.y, e.z, 0.7); }
             break;
         case "jump":
@@ -444,7 +451,7 @@ game.onUpdate(() => {
 
 // ------------------------------------------------------------------ drawing
 const at = { x: 0, y: 0, z: 0, vx: 0, vy: 0 }, tide = {}, fx = { fov: 0, wasWater: 0, breathBeep: 0, wasGround: true, vz: 0 };
-let since = 1;
+let since = 1, portrait = null;
 
 game.onRender((dt, alpha) => {
     // first, so held messages (the welcome among them) are let through even before there is an island
@@ -466,6 +473,8 @@ game.onRender((dt, alpha) => {
     at.vx = me.vx; at.vy = me.vy;
     fx.fov += ((me.hook ? 9 : 0) - fx.fov) * (1 - Math.exp(-dt * 6));
     rig.update(dt, at, view, island, tide.level, { fov: settings.fov + fx.fov });
+    // a portrait camera on one player (screenshots and turntables): orbit at a fixed angle and distance
+    if (portrait) { const c = world.carriers.get(portrait.id) || at; camera.mode = "orbit"; camera.target.set([c.x, c.y, c.z + portrait.height]); camera.distance = portrait.distance; camera.pitch = portrait.pitch; camera.yaw = (c.face ?? 0) + portrait.yaw; }
     camera.update(0);
     world.setWater(tide.level, client.clock, rig.under, camera.eye);
 
@@ -500,6 +509,7 @@ game.onRender((dt, alpha) => {
     world.endRopes();
     world.drawLoot(client);
     world.update(dt);
+    critters.update(dt, tide.level, [...world.carriers.values()]);
 
     const aim = me.alive ? rig.aimAt(island, me) : null;
     $("crosshair").classList.toggle("reach", !!aim && aim.reach && me.hookCool === 0);
@@ -544,6 +554,8 @@ game.start();
 window.tidefall = { game, world, client, sound, controls, view, rig, input, save, settings, conditions, startPractice, playOnline, online, show, resume,
     get room() { return room; }, get screen() { return screen; }, debug() { startPractice(); return "ok"; },
     /** Practice only: jump the match to a tick and put me somewhere, looking somewhere (for screenshots and checks) */
+    /** point a portrait camera at a player: yaw is relative to where they face (0 = from the front) */
+    portrait(id = client.id, yaw = 0, distance = 3.2, height = 1.05, pitch = 0.12) { portrait = id === null ? null : { id, yaw, distance, height, pitch }; return id; },
     stage(tick, x, y, yaw = view.yaw, pitch = view.pitch) {
         if (!room) return "no practice room";
         room.state.tick = tick;

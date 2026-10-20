@@ -228,7 +228,9 @@ export class World {
     recolor() { for (const p of this.players.values()) if (p.raider) p.raider.setColor(teamColor(p.team)); }
 
     /** A player's body begins a shove (my own at once, others when the event arrives). */
-    shove(id) { const p = this.players.get(id); if (p && p.raider) p.raider.shove(); }
+    shove(id) { this.act(id, "shove"); }
+    /** A one-shot on a player's body: "shove", "hookThrow", "celebrate", "drown". */
+    act(id, name) { const p = this.players.get(id); if (p && p.raider) p.raider.play(name); }
 
     /**
      * Draw every player: my own where prediction puts it, the others where interpolation says they were.
@@ -244,7 +246,7 @@ export class World {
                 const p = client.me;
                 s.x = me.x; s.y = me.y; s.z = me.z; s.face = Math.atan2(p.fy, p.fx);
                 s.flags = (p.alive ? FLAG.alive : 0) | (p.ground ? FLAG.ground : 0) | (p.water === 2 ? FLAG.swim : 0) | (p.water === 3 ? FLAG.sunk : 0) | (p.hook ? FLAG.hook : 0) | (p.stun > 0 ? FLAG.stun : 0) | (p.weight >= 7 ? FLAG.idol : 0);
-                s.speed = Math.hypot(p.vx, p.vy); s.vz = p.vz;
+                s.speed = Math.hypot(p.vx, p.vy); s.vz = p.vz; s.weight = p.weight;
             } else if (!client.sample(id, s)) continue;
             seen.add(id);
             const e = this.playerEntity(id, info.team);
@@ -272,8 +274,8 @@ export class World {
                 if (!at) continue;
                 const k = stack.get(item.holder) || 0;
                 stack.set(item.holder, k + 1);
-                // a pack on the back, stacked up; swimming, it rides on the back flat
-                x = at.x - at.fx * 0.32; y = at.y - at.fy * 0.32; z = at.z + (at.swim ? 0.55 : 1.05) + k * 0.24; spin = at.face; scale = 0.8;
+                // on top of the sack on the back, stacked up; swimming, it rides on the back flat
+                x = at.x - at.fx * 0.3; y = at.y - at.fy * 0.3; z = at.z + (at.swim ? 0.6 : 1.32) + k * 0.22; spin = at.face; scale = 0.75;
             } else {
                 // lying loot bobs a little and turns, so it reads as something to take; under water it rests
                 const dry = z > (this.level ?? -99);

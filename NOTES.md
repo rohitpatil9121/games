@@ -15,6 +15,7 @@ skill was loaded for which stage, as the preamble asks.
 | 7 Looks | `threejs-aaa-graphics-builder` (its visual-scorecard reference), `shader-programming` (read at stage 9, after the shaders were written), `performance-optimization` | Terrain, water, stone and sky shaders; sun arc and cascaded shadows; bloom, contrast and grade; GPU-synced timing found shadows were 85% of the frame |
 | 8 Audio, HUD | `audio-design`, `game-ui-ux`, `threejs-game-ui-designer`, `game-feel` | Buses in dB, horn ducking, vertical music layers, synthesised ambience, captions; first-match tips |
 | 9 Polish, QA | `save-systems`, `input-systems`, `threejs-qa-release` (and its canvas inspector's metric formulas), `itch-publish` (build only) | Versioned crash-safe save; rebinding and gamepad menus; real-input playtest, pixel metrics, load and size; itch zip prepared, not uploaded |
+| Character pass | `img2threejs` (character guides), `disney-animation-rule-skill`, `game-ai` | Raider rebuilt with face, variants, sack, pennant; clips by event poses; crabs and gulls |
 
 Preamble additions taken on from stage 6 onward: `GDD.md`; first-two-minutes prompts; captions, text
 size and an assist option; personal best on the results screen; crash-safe versioned save; marketing

@@ -54,6 +54,7 @@ const SOUNDS = {
     uiBack: [0.3, 0, 520, 0.003, 0.01, 0.06, 0, 1.2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0.02],
     win: [0.9, 0, 440, 0.03, 0.35, 0.8, 0, 1.5, 0, 0, 220, 0.11, 0.11, 0, 0, 0, 0.12, 0.7, 0.2],
     lose: [0.7, 0, 300, 0.05, 0.25, 0.8, 0, 1, -6, 0, 0, 0, 0, 0, 0, 0, 0.1, 0.5, 0.3],
+    gull: [0.35, 0.15, 1200, 0.02, 0.08, 0.25, 2, 1.8, -12, 0, 0, 0, 0.12, 0, 6, 0, 0, 0.5, 0.1],
     chime: [0.4, 0, 1047, 0.01, 0.05, 0.4, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0.1, 0.5, 0.2],
 };
 /** recorded takes (Kenney CC0, assets/sounds), picked at random per play */
@@ -62,7 +63,7 @@ const FILES = {
     clank: ["impactPlate_light_000"], ui: ["select_001"], uiBack: ["switch_003"], win: ["powerUp11"], lose: ["lowDown"], drown: ["impactPunch_heavy_000"],
 };
 /** how far each sound carries, in metres; the rest carry 30 */
-const REACH = { step: 18, stroke: 18, jump: 14, land: 18, splash: 35, pick: 22, coins: 22, shove: 30, hook: 40, clank: 40, flare: 60, drop: 18, sink: 25, bank: 45 };
+const REACH = { gull: 60, step: 18, stroke: 18, jump: 14, land: 18, splash: 35, pick: 22, coins: 22, shove: 30, hook: 40, clank: 40, flare: 60, drop: 18, sink: 25, bank: 45 };
 
 const dB = (db) => Math.pow(10, db / 20);
 const PENTA = [0, 2, 4, 7, 9], MINOR = [0, 3, 5, 7, 10];
