@@ -8,12 +8,12 @@ import { encode, decode, byteLength, FLAG, INTERP_TICKS, SNAP_EVERY } from "./pr
  * interpolation, the three transports) and adapted.
  *
  * PREDICTION. Each tick the client sends its input and applies it at once to its own copy of its player,
- * with the same stepPlayer() the server runs. One thing is new: stepPlayer needs the water level, and
- * the water depends on the tick. The client predicts the tick the server will apply each input on: an
- * input acknowledged by the snapshot for server tick T was applied on T, so the inputs still pending
- * after it will be applied on T+1, T+2 and so on. Replays use those ticks; new inputs carry on counting.
- * When the server applies a burst of late inputs in one tick they share that tick's level, which is at
- * most a few millimetres different; reconciliation eases that away like any other small correction.
+ * with the same stepPlayer() the server runs. One thing is new: stepPlayer needs the water level, and the
+ * water depends on time. So each player carries a clock of its own that advances by one tick per input
+ * applied (sim.js), and moves through the water of that tick. The snapshot gives the clock with the rest
+ * of the player; replaying a pending input advances it by one, exactly as the server will. A first
+ * version used the server tick an input was expected to land on instead: late inputs applied in a burst
+ * then shared one tick's water and prediction drifted by up to 7 cm at 150 ms of ping (net-test).
  *
  * RECONCILIATION, INTERPOLATION, transports: as BREACH (see its net.js and README).
  * @module game/net
@@ -97,8 +97,6 @@ export class Client {
         this.island = null;
         this.me = createPlayer(0);
         this.seq = 0;
-        /** the server tick the next input is expected to be applied on, minus one */
-        this.predTick = 0;
         this.pending = [];
         this.prev = { x: 0, y: 0, z: 0 };
         this.offset = { x: 0, y: 0, z: 0 };
@@ -159,8 +157,9 @@ export class Client {
         this.send({ t: "in", s: input.seq, mx: input.mx, my: input.my, b: input.buttons, yaw: input.yaw, pitch: input.pitch, vt: Math.round(this.renderTick * 16) / 16 });
         this.prev.x = me.x; this.prev.y = me.y; this.prev.z = me.z;
         if (this.match.phase !== "play") return;
-        this.predTick++;
-        stepPlayer(this.island, me, input, this.level(this.predTick));
+        // the player's own clock (see sim.js createPlayer): the server will step this input at clock + 1
+        me.clock++;
+        stepPlayer(this.island, me, input, this.level(me.clock));
         if (me.jumped) this.emit("predicted", { type: "jump", id: this.id });
         if (me.hookFired) this.emit("predicted", { type: "hook", id: this.id, hit: me.hookFired === 1 ? 1 : 0, x: me.hx, y: me.hy, z: me.hz });
     }
@@ -198,7 +197,6 @@ export class Client {
         this.loot.clear();
         this.renderTick = tick - INTERP_TICKS;
         this.serverTick = tick;
-        this.predTick = tick;
         this.match.phase = "play"; this.match.winner = -1; this.match.bank = [0, 0, 0, 0];
         this.offset.x = this.offset.y = this.offset.z = 0;
     }
@@ -239,8 +237,7 @@ export class Client {
         me.carry = you.carry.slice();
         if (!you.hook) me.hook = 0;
         me.water = 0;
-        if (this.match.phase === "play") for (let i = 0; i < this.pending.length; i++) stepPlayer(this.island, me, this.pending[i], this.level(tick + i + 1));
-        this.predTick = tick + this.pending.length;
+        if (this.match.phase === "play") for (let i = 0; i < this.pending.length; i++) { me.clock++; stepPlayer(this.island, me, this.pending[i], this.level(me.clock)); }
         if (!this.pending.length) { me.yaw = yaw; me.pitch = pitch; }
         this.stats.replayed = this.pending.length;
 

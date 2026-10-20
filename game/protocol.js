@@ -34,7 +34,7 @@ import { BTN } from "./data.js";
  * @module game/protocol
  */
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 /** a snapshot goes out every this many ticks (20 Hz) */
 export const SNAP_EVERY = 3;
 /** remote players are drawn this many ticks behind the newest snapshot */
@@ -121,7 +121,7 @@ function encodeYou(b, y) {
     b.u8((y.ground ? 1 : 0) | (y.alive ? 2 : 0) | (y.hook ? 4 : 0));
     b.u16(y.breath); b.u8(Math.min(255, y.air)); b.u8(Math.min(255, y.jumpAge)); b.u8(Math.min(255, y.pickAge));
     b.u8(y.weight); b.u8(Math.min(255, y.hookT)); b.u16(y.hookCool); b.u8(y.shoveCool); b.u16(y.flareCool); b.u8(y.stun); b.u8(y.blind); b.u8(y.guard); b.u16(y.respawn);
-    b.u8(y.buttons); b.u16(y.yaw); b.i16(y.pitch);
+    b.u8(y.buttons); b.u16(y.yaw); b.i16(y.pitch); b.u32(y.clock);
     if (y.hook) { b.f64(y.hx); b.f64(y.hy); b.f64(y.hz); }
     b.u8(y.carry.length);
     for (const id of y.carry) b.u16(id);
@@ -131,7 +131,7 @@ function decodeYou(b) {
     y.ground = (f & 1) !== 0; y.alive = (f & 2) !== 0; y.hook = f & 4 ? 1 : 0;
     y.breath = b.u16(); y.air = b.u8(); y.jumpAge = b.u8(); y.pickAge = b.u8();
     y.weight = b.u8(); y.hookT = b.u8(); y.hookCool = b.u16(); y.shoveCool = b.u8(); y.flareCool = b.u16(); y.stun = b.u8(); y.blind = b.u8(); y.guard = b.u8(); y.respawn = b.u16();
-    y.buttons = b.u8(); y.yaw = b.u16(); y.pitch = b.i16();
+    y.buttons = b.u8(); y.yaw = b.u16(); y.pitch = b.i16(); y.clock = b.u32();
     if (y.hook) { y.hx = b.f64(); y.hy = b.f64(); y.hz = b.f64(); }
     y.carry = [];
     for (let n = b.u8(); n > 0; n--) y.carry.push(b.u16());

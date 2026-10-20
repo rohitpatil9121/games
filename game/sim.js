@@ -1,7 +1,7 @@
 import { DT, TICK_RATE, BTN, MOVE, WATER, LOOT, LOOT_KINDS, CARRY, TOOLS, MATCH, ISLAND, HISTORY, MAX_REWIND } from "./data.js";
 import { dsin, dcos, yawOf, pitchOf, quantizeYaw, nextSeed, hashSeed } from "./det.js";
 import { groundAt, rollLoot } from "./island.js";
-import { tideAt, PHASE } from "./tide.js";
+import { tideAt, waterAt, PHASE } from "./tide.js";
 
 /**
  * TIDEFALL: the match simulation. Pure and deterministic: no DOM, no WebGL, no clock, no Math.random.
@@ -93,6 +93,12 @@ export function createPlayer(id, name = "Player") {
         breath: WATER.breath * TICK_RATE,
         buttons: 0,
         seq: 0,
+        /**
+         * the player's own clock, in ticks: one per input applied. The water a player moves through is the
+         * water at this tick, so a client predicting itself knows the level exactly even when its inputs reach
+         * the server late and are applied in a burst (it lags the match by at most the half second of credit).
+         */
+        clock: 0,
         /** ticks since last on the ground (coyote time) and ticks since jump was last pressed (buffer) */
         air: 0, jumpAge: 99, pickAge: 99,
         /** loot ids carried, oldest first, and their total weight */
@@ -150,6 +156,7 @@ export function spawnPlayer(state, island, p) {
     p.carry = []; p.weight = 0;
     p.hook = 0; p.hookCool = 0; p.stun = 0; p.blind = 0; p.guard = 0; p.respawn = 0;
     p.air = 0; p.jumpAge = 99; p.pickAge = 99;
+    p.clock = state.tick;
     for (let i = 0; i < HISTORY; i++) { p.hist[i * 3] = p.x; p.hist[i * 3 + 1] = p.y; p.hist[i * 3 + 2] = p.z; }
     state.events.push({ type: "spawn", id: p.id });
 }
@@ -619,8 +626,10 @@ function drown(state, island, p) {
     state.events.push({ type: "drown", id: p.id });
 }
 
-function applyInput(state, island, p, input, level) {
-    stepPlayer(island, p, input, level);
+function applyInput(state, island, p, input) {
+    p.clock++;
+    if (p.clock > state.tick) p.clock = state.tick;
+    stepPlayer(island, p, input, waterAt(state.seed, p.clock));
     if (!p.alive) return;
     if (p.jumped) state.events.push({ type: "jump", id: p.id });
     if (p.hookFired) state.events.push({ type: "hook", id: p.id, hit: p.hookFired === 1 ? 1 : 0, x: p.hx, y: p.hy, z: p.hz });
@@ -661,11 +670,16 @@ export function step(state, island, inputs) {
     }
 
     shoves.length = 0;
-    for (const p of state.players) {
+    // players go in a turning order, so nobody always wins the race for an item two reach on the same tick
+    const n = state.players.length, first = n ? state.tick % n : 0;
+    for (let k = 0; k < n; k++) {
+        const p = state.players[(first + k) % n];
         const given = inputs.get(p.id);
-        if (Array.isArray(given)) for (let i = 0; i < given.length; i++) applyInput(state, island, p, given[i], level);
-        else if (given) applyInput(state, island, p, given, level);
-        else { idle.seq = p.seq; idle.yaw = p.yaw; idle.pitch = p.pitch; applyInput(state, island, p, idle, level); }
+        // a player whose clock fell far behind (a long stall) is brought up to the present
+        if (p.clock < state.tick - 60) p.clock = state.tick - 60;
+        if (Array.isArray(given)) for (let i = 0; i < given.length; i++) applyInput(state, island, p, given[i]);
+        else if (given) applyInput(state, island, p, given);
+        else { idle.seq = p.seq; idle.yaw = p.yaw; idle.pitch = p.pitch; p.clock = state.tick - 1; applyInput(state, island, p, idle); }
         if (p.alive) bankAt(state, island, p);
     }
     // remember where everyone is, for shoves that arrive late
