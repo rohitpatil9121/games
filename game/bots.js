@@ -234,13 +234,15 @@ export function think(state, island, bot, brain) {
     }
 
     // shove: a rival with loot in reach in front of me (or anyone in my way when I'm stealing)
-    let shoveTarget = null;
+    // the nearest one (taking the last in the list made every bot rob the same teams first: a bot-match
+    // run showed teams 2 and 3 losing far more loot to shoves than teams 0 and 1)
+    let shoveTarget = null, nearest = Infinity;
     for (const q of state.players) {
         if (q.team === bot.team || !q.alive || q.guard > 0) continue;
         const d = Math.hypot(q.x - bot.x, q.y - bot.y);
         if (d > TOOLS.shove.range * 0.9 || Math.abs(q.z - bot.z) > 1.4) continue;
         if (!q.carry.length && brain.intent !== "defend") continue;
-        shoveTarget = q;
+        if (d < nearest) { nearest = d; shoveTarget = q; }
     }
     if (shoveTarget) {
         if (++brain.shoveSeen > SHOVE_DELAY[brain.skill] && bot.shoveCool === 0) {

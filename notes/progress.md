@@ -183,3 +183,65 @@ spatial by the camera; captions for the horn, bell, shoves, rival flares, low br
 change (in this copy): `Audio.play` takes `opts.bus`. First-two-minutes tips: `game/tutorial.js`.
 Checked in headless Chrome: the audio context runs, the horn ducks to 0.355 (-9 dB), the sequencer
 advances, the caption shows. Not checked: how any of it sounds; I can't listen.
+
+## Stage 9: lag test, settings, accessibility, QA, release kit
+
+Netcode (`npm run test:net`, BREACH's harness adapted): the first run showed prediction drifting up to
+7 cm at 150 ms (late inputs applied in a burst shared one tick's water). Fix: each player has a clock of
+its own, one tick per input applied, and moves through the water of that tick; the snapshot carries it.
+Now 0.0000 m error at 0, 60, 150 ms with jitter, 3% loss, and 300 ms with 5% loss. Shoves at 150 ms ±20
+land 40/44 (24/46 without lag compensation). Traffic with 8 players: 3.5 kB/s down, 1.0 up (JSON: 62.4).
+Real server over sockets: rooms, the shared island seed, refusing a bad hello and a wrong code: all pass.
+
+Also: the player order inside a tick now turns (a bot-match run showed team 0 always winning same-tick
+races for an item); settings screen (sensitivity, invert, FOV, quality, water, shadows, bloom, three
+volumes, captions, reduce motion, colour-blind team colours, text size, an assist with 50% more breath
+shown on the scoreboard), rebinding with gamepad codes, menus driven by d-pad/A/B, chat, a versioned
+crash-safe save (tested: store, reload, corrupt the main copy and recover the backup, migrate a v1 save),
+personal best and match count.
+
+QA (`threejs-qa-release`):
+- `npm test`: 26 simulation tests and 60 islands pass.
+- `tools/playtest.mjs`: a match played through real key presses in headless Chrome: picked up at 12 s,
+  banked at 17 s, went out greedy with over 4 kg, the flood took it at 83 s; tips appeared; no errors.
+- Static build (`dist/tidefall-web`, served alone): Practice starts, online is greyed out with a message.
+- Viewports: 1280×720, 1600×900, 844×390 (phone landscape: the first-match tip overlapped the tide clock;
+  moved below it under 960 px), 390×844 title. Touch controls exist but only show on a coarse pointer; not
+  tried on a phone.
+- Debug hooks (`window.tidefall`, `stage()` only works in Practice, F3 panel) are left in on purpose, as in
+  BREACH.
+
+AAA scorecard (stage 7 captures and the final ones; metrics from `tools/inspect.mjs`):
+
+| Category | Score | Evidence |
+|---|---|---|
+| Art direction | 2 | One palette (sand, teal, team colours) drives terrain, props, UI; the day turns to sunset over the match |
+| Hero/player | 2 | Authored raider (hat in team band, satchel with coiled rope, 11 clips incl. swim, shove wind-up, stagger); no faces |
+| Rivals and the flood | 2 | Team shirts and flags, idol carriers glow and get a marker, shove wind-up, horn + red edge + rising HUD for the flood |
+| Rewards | 2 | Three loot silhouettes by size, shape and colour; bob and turn on land; glint, chime and notice on pick-up and bank |
+| World | 2 | Ruins with rubble, kelp, shells, driftwood, palms, grass, camps; the beach is still plain in places (beach view contrast 43.6) |
+| Materials | 2 | Procedural stone courses, planks, moss, tide marks, barnacles, wet sand, ripples, caustics, water depth colour |
+| Lighting | 2 | Sun arc with 2 cascades, fire lights, flares, bloom, contrast/saturation grade, underwater fog and ceiling |
+| VFX | 2 | Splash in/out, dust on footsteps, glints, shove puffs, flare embers, bubbles when loot sinks |
+| UI/HUD | 2 | Tide clock with phase bar, compass to camp, weight bar with the 4 kg mark, feed, captions, tips |
+| Performance evidence | 3 | Before/after: shadows 11.8 → 1.6 ms at 8 players on Intel UHD; budgets, draw counts, sizes |
+
+Average 2.1: premium needs 2.3. Metrics of the active views: entropy 4.6–5.2 bits, edge density 0.07–0.21,
+contrast 44–134, dominant colour 0.12–0.21. Next pass to raise it: faces and varied hats on the raiders,
+denser beach dressing, breaking wave crests at the shoreline.
+
+Balance (`npm run bots`), and three bugs it found:
+- Bots robbed the same teams first (they took the last eligible rival in the list); now the nearest.
+- Players in a tick always went in the same order (team 0 won same-tick races for an item); now turning.
+- Bots share a budget of one path search per tick and always thought in the same order; now turning.
+- A worrying "camp 1 wins 46%" turned out to be the same 24 islands replayed (matches are deterministic,
+  so three runs on one seed set are one experiment). On fresh seeds (SEED=50000), with the fixes:
+  wins by camp 4 / 8 / 4 / 8 of 24, average bank 602 / 728 / 604 / 661; the geometry is identical per
+  camp (ring travel times agree to 0.01 s). 3% of carried loot lost to the sea, 15 heavy loads taken by
+  the flood, 6 drownings, 953 shoves, 574 steals. Greed: careful 319 banked / 5 lost to the sea, middle
+  343 / 11, greedy 311 / 9; the middle third won most (36%). Greed is a gamble for bots, not a winning
+  strategy; whether it pays for people is for a playtest.
+- Skill: easy against normal in 12 matches of 2 teams of 3: easy's team won 7. Skill levels don't
+  separate; they only change reaction time and how well a bot judges the flood. Open issue.
+- Server tick with 8 bots, run alone: 0.35 ms average, 14.4 ms worst, none over 16 ms. (Runs that shared
+  the machine with others showed worst ticks of 0.2 to 0.9 s: that was the machine, not the game.)

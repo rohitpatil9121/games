@@ -176,7 +176,11 @@ export class Room {
             for (const input of batch) input.lag = this.rewind ? Math.max(0, Math.min(MAX_REWIND, state.tick + 1 - input.vt)) : 0;
             this.inputs.set(c.id, batch);
         }
-        for (const [id, brain] of this.brains) {
+        // bots think in a turning order: they share a budget of path searches per tick (game/bots.js), and
+        // the last in a fixed order would always wait longest for theirs
+        const brains = [...this.brains], first = brains.length ? this.age % brains.length : 0;
+        for (let k = 0; k < brains.length; k++) {
+            const [id, brain] = brains[(first + k) % brains.length];
             const bot = findPlayer(state, id);
             const input = bot && think(state, this.island, bot, brain);
             if (input) this.inputs.set(id, input); else this.inputs.delete(id);

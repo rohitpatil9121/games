@@ -17,6 +17,8 @@ import { Room } from "../server/room.mjs";
 import { TICK_RATE } from "../game/data.js";
 
 const MATCHES = Number(process.argv[2] || 12), TEAMS = Number(process.argv[3] || 4), PER = Number(process.argv[4] || 2), MIXED = process.argv[5] === "mixed";
+/** where the run's seeds start (SEED=5000 node tools/bot-match.mjs): matches are deterministic, so a fresh look needs fresh seeds */
+const SEED_BASE = Number(process.env.SEED || 1000);
 const SKILLS = [1, 2, 3, 2];
 
 const byCamp = Array.from({ length: TEAMS }, () => ({ wins: 0, bank: 0 }));
@@ -25,7 +27,7 @@ const bots = [];
 let slow = 0, lost = 0, gasps = 0, drowns = 0, banked = 0, draws = 0, ticks = 0, tickMs = 0, worstTick = 0, steals = 0, shoves = 0;
 
 for (let m = 0; m < MATCHES; m++) {
-    const room = new Room({ code: "BOTS", teams: TEAMS, bots: TEAMS * PER, skill: 2, seed: 1000 + m * 7919 });
+    const room = new Room({ code: "BOTS", teams: TEAMS, bots: TEAMS * PER, skill: 2, seed: SEED_BASE + m * 7919 });
     if (MIXED) for (const [id, brain] of room.brains) { const p = room.state.players.find((q) => q.id === id); brain.skill = SKILLS[p.team]; }
     const state0 = room.state;
     let gaspN = 0, drownN = 0;
