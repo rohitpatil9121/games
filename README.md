@@ -4,6 +4,8 @@
 
 ### The sea goes out. The ruins come up. Get back before it returns.
 
+**[▶ Play Practice mode now](https://rohitpatil9121.github.io/games/tidefall/)**
+
 `JavaScript` · `WebGL2` · `GLSL` · `Projection Lab engine` · `Node + ws` · `No build step`
 
 </div>
