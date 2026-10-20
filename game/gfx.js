@@ -112,7 +112,7 @@ void main() {
     albedo *= 1.0 - 0.38 * wet;
     vec3 light = labLight(w, n);
     vec3 view = normalize(u_camPos - w);
-    light += u_sunColor * pow(max(dot(n, normalize(view + u_sunDirection)), 0.0), 40.0) * 0.6 * wet * labShadow(w, n);
+    light += u_sunColor * pow(max(dot(n, normalize(view + u_sunDirection)), 0.0), 60.0) * 0.22 * wet * labShadow(w, n);
     albedo = seaShade(albedo, w, n, light);
     vec3 color = albedo * light;
     float edge = abs(w.z - u_level);

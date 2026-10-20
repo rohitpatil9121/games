@@ -29,7 +29,7 @@ export class Loopback {
     constructor(room) { this.room = room; this.id = 0; this.onmessage = null; this.onclose = null; this.open = false; }
     connect(name) {
         this.open = true;
-        this.id = this.room.join((data) => { if (this.open && this.onmessage) this.onmessage(data); }, name);
+        this.id = this.room.join((data) => { if (this.open && this.onmessage) this.onmessage(data); }, name, !!this.room.assist);
     }
     send(data) { if (this.open) this.room.receive(this.id, data); }
     close() { if (!this.open) return; this.open = false; this.room.leave(this.id); }

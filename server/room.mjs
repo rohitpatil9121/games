@@ -68,14 +68,16 @@ export class Room {
 
     // ------------------------------------------------------------------ people
 
-    join(send, name) {
+    /** @param {boolean} [assist] the player asked for more breath (shown to everyone on the scoreboard) */
+    join(send, name, assist = false) {
         const id = this.freeId();
         const client = { id, send, name: cleanText(name, NAME_MAX) || "Player", queue: [], lastSeq: 0, credit: CREDIT_MAX, ping: 0,
             sent: new Map(), sentScores: new Map(), sentLoot: new Map(), pingSent: 0, pingN: 0, tokens: BURST, chatAt: -1000 };
         this.clients.set(id, client);
         if (!this.host) this.host = id;
         this.fillBots();
-        addPlayer(this.state, this.island, id, client.name, { team: this.smallerTeam() });
+        addPlayer(this.state, this.island, id, client.name, { team: this.smallerTeam(), assist });
+        client.assist = !!assist;
         this.sendTo(client, { t: "welcome", id, room: this.info(), tick: this.state.tick });
         this.roster();
         this.log(`${this.code}: ${client.name} joined (${this.humans} here)`);
@@ -149,8 +151,8 @@ export class Room {
         this.brains.clear();
         for (const p of old) {
             if (!this.clients.has(p.id)) continue;
-            addPlayer(this.state, this.island, p.id, p.name, { team: this.smallerTeam() });
             const c = this.clients.get(p.id);
+            addPlayer(this.state, this.island, p.id, p.name, { team: this.smallerTeam(), assist: c.assist });
             c.queue.length = 0; c.lastSeq = 0; c.sent.clear(); c.sentScores.clear(); c.sentLoot.clear();
         }
         this.fillBots();
@@ -248,7 +250,7 @@ export class Room {
     }
 
     roster() {
-        this.broadcast({ t: "roster", host: this.host, players: this.state.players.map((p) => ({ id: p.id, name: p.name, team: p.team, bot: p.bot })) });
+        this.broadcast({ t: "roster", host: this.host, players: this.state.players.map((p) => ({ id: p.id, name: p.name, team: p.team, bot: p.bot, assist: p.assist ? 1 : 0 })) });
     }
 
     sendTo(client, message) { client.send(encode(message)); }

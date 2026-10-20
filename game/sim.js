@@ -91,6 +91,8 @@ export function createPlayer(id, name = "Player") {
         water: 0,
         /** ticks of breath left */
         breath: WATER.breath * TICK_RATE,
+        /** the assist setting: more breath (shown on the scoreboard) */
+        assist: false,
         buttons: 0,
         seq: 0,
         /**
@@ -124,6 +126,7 @@ export function addPlayer(state, island, id, name, options = {}) {
     const p = createPlayer(id, name);
     p.team = Math.max(0, Math.min(island.teams - 1, options.team | 0));
     p.bot = options.bot || 0;
+    p.assist = !!options.assist;
     state.players.push(p);
     spawnPlayer(state, island, p);
     return p;
@@ -152,7 +155,7 @@ export function spawnPlayer(state, island, p) {
     p.yaw = quantizeYaw(out); p.pitch = 0;
     p.fx = dcos(out); p.fy = dsin(out);
     p.ground = false; p.water = 0; p.alive = true;
-    p.breath = WATER.breath * TICK_RATE;
+    p.breath = breathMax(p);
     p.carry = []; p.weight = 0;
     p.hook = 0; p.hookCool = 0; p.stun = 0; p.blind = 0; p.guard = 0; p.respawn = 0;
     p.air = 0; p.jumpAge = 99; p.pickAge = 99;
@@ -267,6 +270,8 @@ export function aimOf(p) {
 
 // ------------------------------------------------------------------ movement
 
+/** ticks of breath a player has in full: half as much again with the assist setting */
+export const breathMax = (p) => WATER.breath * TICK_RATE * (p.assist ? 1.5 : 1);
 export const slowOf = (p) => Math.max(0.45, 1 - p.weight * CARRY.slowPerKg);
 export const headOf = (p) => p.z + MOVE.eye;
 
@@ -449,7 +454,7 @@ export function stepPlayer(island, p, input, level) {
     if (level > p.z + MOVE.eye + 0.05) {
         if (p.breath > 0) p.breath--;
         if (p.breath === 0) p.gasp = true;
-    } else if (p.breath < WATER.breath * TICK_RATE) p.breath = Math.min(WATER.breath * TICK_RATE, p.breath + 3);
+    } else if (p.breath < breathMax(p)) p.breath = Math.min(breathMax(p), p.breath + 3);
 
     p.buttons = buttons;
 }
@@ -640,7 +645,7 @@ function applyInput(state, island, p, input) {
     if (p.gasp) {
         let heavy = false;
         for (const id of p.carry) { const it = findLoot(state, id); if (it && weightOf(it.kind) >= 3) heavy = true; }
-        if (heavy) { dropAll(state, island, p, true); p.breath = Math.round(WATER.breath * 0.35 * TICK_RATE); }
+        if (heavy) { dropAll(state, island, p, true); p.breath = Math.round(breathMax(p) * 0.35); }
         else drown(state, island, p);
     }
     if (p.z < MOVE.killZ) drown(state, island, p);

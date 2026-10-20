@@ -326,9 +326,9 @@ export class World {
     setWater(level, tick, under, eye) {
         this.level = level;
         if (!this.island) return;
-        // the wet line follows the water up at once and lags behind it going down, drying at 4 cm a second
+        // the wet line follows the water up at once and lags behind it going down, drying at 9 cm a second
         const dt = this._dt || 0;
-        this.wetLine = Math.max(level, this.wetLine - dt * 0.04);
+        this.wetLine = Math.max(level, this.wetLine - dt * 0.09);
         setSea(level, this.wetLine, under > 0.5 ? 1 : 0);
         // the sea grid snaps to 4 m under the camera, so its waves don't swim as it moves
         if (this.sea) this.sea.setPosition(Math.round(eye[0] / 4) * 4, Math.round(eye[1] / 4) * 4, 0);

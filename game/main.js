@@ -1,5 +1,5 @@
 import { Game, Camera, PostFX } from "../engine/index.js";
-import { LOOT, LOOT_KINDS, TICK_RATE, BTN, MATCH, TOOLS, WATER, TEAM_NAMES, teamColor } from "./data.js";
+import { LOOT, LOOT_KINDS, TICK_RATE, BTN, MATCH, TOOLS, WATER, TEAM_NAMES, TEAM_SCHEMES, teamColors, teamColor } from "./data.js";
 import { quantizeYaw, quantizePitch } from "./det.js";
 import { reachableLoot } from "./sim.js";
 import { tideAt, matchLeft, waterAt } from "./tide.js";
@@ -10,7 +10,8 @@ import { World } from "./world.js";
 import { loadCharacters } from "./characters.js";
 import { Sound } from "./sound.js";
 import { Tutorial } from "./tutorial.js";
-import { Controls, defaultBindings, keyHint } from "./controls.js";
+import { load as loadSave, store as storeSave } from "./save.js";
+import { Controls, defaultBindings, keyHint, ACTIONS, describe } from "./controls.js";
 import { ThirdPerson } from "./camera.js";
 import { Hud } from "./hud.js";
 import { FLAG } from "./protocol.js";
@@ -25,15 +26,13 @@ import { Room } from "../server/room.mjs";
 
 const $ = (id) => document.getElementById(id);
 
-// ------------------------------------------------------------------ saved between visits
-const SAVE_KEY = "tidefall-save-v1";
-const save = (() => {
-    const base = { name: "", practice: { teams: 2, bots: 4, skill: 2 }, settings: { sensitivity: 1, invertY: false, fov: 70, bindings: defaultBindings() } };
-    try { const s = JSON.parse(localStorage.getItem(SAVE_KEY) || "{}"); return { ...base, ...s, practice: { ...base.practice, ...(s.practice || {}) }, settings: { ...base.settings, ...(s.settings || {}) } }; }
-    catch { return base; }
-})();
-const persist = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch { /* storage unavailable */ } };
+// ------------------------------------------------------------------ saved between visits (game/save.js)
+const save = loadSave();
+const persist = () => storeSave(save);
 const settings = save.settings;
+const systemReducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** null in the settings means "do as the system says" */
+const reducedMotion = () => settings.reducedMotion ?? systemReducedMotion;
 
 // ------------------------------------------------------------------ engine
 const canvas = $("view");
@@ -48,30 +47,51 @@ const controls = new Controls(input, canvas, settings);
 const view = controls.view;
 const rig = new ThirdPerson(camera);
 const hud = new Hud(client);
-save.tutorial = save.tutorial || { seen: [], done: false };
 const tutorial = new Tutorial(save.tutorial, (text, seconds) => hud.tip(text, seconds));
 const keyName = (id) => (id === "move" ? ["forward", "left", "back", "right"].map((a) => keyHint(settings.bindings, a)).join("") : keyHint(settings.bindings, id)) || id;
-const sound = new Sound({ volume: settings.volume ?? 0.8 });
-sound.captions = settings.captions ?? true;
+const sound = new Sound({ volume: settings.volume });
 sound.onCaption = (text, seconds) => hud.caption(text, seconds);
 // browsers allow sound only after a click or a key press
 for (const type of ["pointerdown", "keydown"]) addEventListener(type, () => sound.start(), { once: true });
 // every button clicks
 document.addEventListener("click", (e) => { if (e.target instanceof HTMLElement && e.target.closest("button")) sound.click(e.target.closest("button").id === "leave"); });
 
+/** Put the settings into effect. Called at start and whenever one changes. */
+function applySettings() {
+    renderer.setQuality(settings.quality);
+    world.setQuality(settings.water);
+    world.setShadows(settings.shadows);
+    renderer.postfx.settings.bloom.enabled = settings.bloom;
+    camera.fov = settings.fov;
+    const db = (v) => (v <= 0.001 ? -60 : 20 * Math.log10(v));
+    sound.levels.music = -8 + db(settings.music); sound.levels.sfx = db(settings.sfx);
+    sound.setVolume(settings.volume);
+    sound.captions = settings.captions;
+    game.juice.reducedMotion = reducedMotion();
+    world.reducedMotion = reducedMotion();
+    document.body.classList.toggle("reduce-motion", reducedMotion());
+    if (teamColors.scheme !== settings.scheme) { teamColors.scheme = settings.scheme; world.recolor(); if (client.island) world.loadIsland(client.island); }
+    for (const id of ["hud", "title", "pause", "settings"]) $(id).style.zoom = String(settings.textSize);
+    controls.apply();
+    persist();
+}
+
 // ------------------------------------------------------------------ screens
-let screen = "title";
+let screen = "title", settingsFrom = "title";
 function show(name) {
+    if (name === "settings") settingsFrom = screen === "settings" ? settingsFrom : screen;
     screen = name;
-    const inMatch = name === "play" || name === "pause";
+    const inMatch = name === "play" || name === "pause" || (name === "settings" && settingsFrom !== "title");
     $("title").hidden = name !== "title";
     $("pause").hidden = name !== "pause";
+    $("settings").hidden = name !== "settings";
     $("hud").hidden = !inMatch;
     controls.active = name === "play";
     controls.showTouch(name === "play");
     if (name !== "play") for (const code of [...input.down]) input.release(code);
     if (name === "title") $("practice").focus();
     else if (name === "pause") $("resume").focus();
+    else if (name === "settings") { $("settings-back").focus({ preventScroll: true }); $("settings").querySelector(".panel").scrollTop = 0; }
 }
 function lockMouse() {
     if (controls.coarse) return;
@@ -88,6 +108,7 @@ function startPractice() {
     leave();
     const p = save.practice;
     room = new Room({ code: "PRACTICE", teams: p.teams, bots: p.bots + 1, skill: p.skill, seed: (Date.now() & 0xffffff) + 1 });
+    room.assist = settings.assist;
     const link = new Conditions(new Loopback(room), conditions);
     link.settings = conditions;
     client.attach(link);
@@ -126,7 +147,7 @@ function playOnline(hello) {
     const link = new Conditions(new SocketTransport(online.url), conditions);
     link.settings = conditions;
     client.attach(link);
-    link.onopen = () => client.send({ t: "hello", v: PROTOCOL, name: playerName(), ...hello });
+    link.onopen = () => client.send({ t: "hello", v: PROTOCOL, name: playerName(), assist: !!settings.assist, ...hello });
     link.connect();
     resume();
     notice("Connecting…", 20);
@@ -174,8 +195,94 @@ addEventListener("keydown", (e) => {
     else if (e.code === "Escape" && performance.now() - lockLost > 400) {
         if (screen === "play" && !document.pointerLockElement) show("pause");
         else if (screen === "pause") resume();
+        else if (screen === "settings" && !capturing) show(settingsFrom);
     }
 });
+
+// ------------------------------------------------------------------ the settings screen
+let capturing = false;
+{
+    const bind = (id, key, read, write, event = "input") => {
+        const node = $(id);
+        write(node, settings[key]);
+        node.addEventListener(event, () => { settings[key] = read(node); applySettings(); labels(); });
+    };
+    const number = (n) => +n.value, checked = (n) => n.checked, value = (n) => n.value;
+    const setValue = (n, v) => { n.value = String(v); }, setChecked = (n, v) => { n.checked = !!v; };
+    const pct = (v) => Math.round(v * 100) + "%";
+    const labels = () => {
+        $("s-sensitivity-out").textContent = settings.sensitivity.toFixed(2);
+        $("s-fov-out").textContent = settings.fov + "°";
+        $("s-volume-out").textContent = pct(settings.volume); $("s-music-out").textContent = pct(settings.music); $("s-sfx-out").textContent = pct(settings.sfx);
+    };
+    bind("s-sensitivity", "sensitivity", number, setValue);
+    bind("s-invert", "invertY", checked, setChecked, "change");
+    bind("s-fov", "fov", number, setValue);
+    bind("s-quality", "quality", value, setValue, "change");
+    bind("s-water", "water", value, setValue, "change");
+    bind("s-shadows", "shadows", checked, setChecked, "change");
+    bind("s-bloom", "bloom", checked, setChecked, "change");
+    bind("s-volume", "volume", number, setValue);
+    bind("s-music", "music", number, setValue);
+    bind("s-sfx", "sfx", number, setValue);
+    bind("s-captions", "captions", checked, setChecked, "change");
+    bind("s-text", "textSize", number, setValue, "change");
+    bind("s-assist", "assist", checked, setChecked, "change");
+    $("s-scheme").replaceChildren(...Object.entries(TEAM_SCHEMES).map(([id, sc]) => new Option(sc.name, id)));
+    bind("s-scheme", "scheme", value, setValue, "change");
+    $("s-motion").value = settings.reducedMotion === null ? "system" : settings.reducedMotion ? "on" : "off";
+    $("s-motion").addEventListener("change", () => { const v = $("s-motion").value; settings.reducedMotion = v === "system" ? null : v === "on"; applySettings(); });
+    labels();
+
+    // bindings: one row per action; press the button, then the key, mouse button or gamepad button
+    const list = $("bindings");
+    const rows = () => {
+        list.replaceChildren(...ACTIONS.map((a) => {
+            const row = document.createElement("div"), label = document.createElement("span"), button = document.createElement("button"), pad = document.createElement("span");
+            const d = describe(settings.bindings[a.id] || []);
+            row.className = "binding"; label.textContent = a.label; button.textContent = d.keys; pad.className = "pad"; pad.textContent = d.pad === "none" ? "" : d.pad;
+            button.setAttribute("aria-label", `${a.label}: ${d.keys}. Press to change.`);
+            button.addEventListener("click", async () => {
+                if (capturing) return;
+                capturing = true;
+                button.textContent = "Press a key…"; button.classList.add("listening");
+                await controls.capture(a.id);
+                capturing = false;
+                persist(); rows();
+                [...list.querySelectorAll("button")][ACTIONS.indexOf(a)].focus();
+            });
+            row.append(label, button, pad);
+            return row;
+        }));
+    };
+    rows();
+    $("bindings-reset").addEventListener("click", () => { settings.bindings = defaultBindings(); controls.settings = settings; applySettings(); rows(); });
+    $("settings-back").addEventListener("click", () => show(settingsFrom));
+    for (const id of ["open-settings", "open-settings-2"]) $(id).addEventListener("click", () => show("settings"));
+}
+
+// ------------------------------------------------------------------ menus by gamepad: the d-pad or stick moves focus, A presses, B goes back
+{
+    let held = 0, was = { a: false, b: false };
+    setInterval(() => {
+        if (screen === "play") return;
+        const pads = navigator.getGamepads ? navigator.getGamepads() : [], pad = [...pads].find((p) => p && p.connected);
+        if (!pad) return;
+        const up = pad.buttons[12]?.pressed || pad.axes[1] < -0.6, down = pad.buttons[13]?.pressed || pad.axes[1] > 0.6;
+        const a = !!pad.buttons[0]?.pressed, b = !!pad.buttons[1]?.pressed;
+        const panel = $(screen);
+        if ((up || down) && held <= 0 && panel) {
+            const items = [...panel.querySelectorAll("button, input, select, summary")].filter((n) => n.offsetParent !== null && !n.disabled);
+            const i = items.indexOf(document.activeElement);
+            const next = items[(i + (down ? 1 : -1) + items.length) % items.length];
+            if (next) next.focus();
+            held = 8;
+        } else if (!up && !down) held = 0; else held--;
+        if (a && !was.a && document.activeElement instanceof HTMLElement) document.activeElement.click();
+        if (b && !was.b) { if (screen === "settings") show(settingsFrom); else if (screen === "pause") resume(); }
+        was = { a, b };
+    }, 50);
+}
 
 // ------------------------------------------------------------------ what the match tells us
 function notice(text, seconds = 3) { hud.notice(text, seconds); }
@@ -226,6 +333,12 @@ function onEvent(e) {
         case "over":
             notice(e.winner < 0 ? "A draw" : e.winner === me.team ? "Your team wins" : `${TEAM_NAMES[e.winner]} wins`, 6);
             sound.play(e.winner === me.team ? "win" : "lose", 0.9);
+            {
+                const mine = client.players.get(client.id)?.banked || 0;
+                save.stats.matches++; save.stats.banked += mine;
+                if (mine > save.stats.best) { save.stats.best = mine; hud.feed(`New personal best: <b>${mine}</b> banked`); }
+                persist();
+            }
             break;
         case "phase":
             if (e.phase === 0) { notice(`Tide ${e.tide + 1} of 6: the sea goes out`, 3); sound.play("chime", 0.6); sound.caption("[Bell: the sea goes out]", 2); }
@@ -286,6 +399,33 @@ function onEvent(e) {
     }
 }
 
+// ------------------------------------------------------------------ chat (as BREACH): its key opens the box, Enter sends, Escape closes
+const chatForm = $("chat-form"), chatInput = $("chat-input");
+function openChat() {
+    if (screen !== "play" || !client.joined) return;
+    for (const code of [...input.down]) input.release(code);
+    chatForm.hidden = false; chatInput.value = ""; chatInput.focus();
+}
+function closeChat() { chatForm.hidden = true; chatInput.blur(); canvas.focus(); }
+chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = cleanText(chatInput.value, 120);
+    if (text) client.send({ t: "chat", text });
+    closeChat();
+});
+chatInput.addEventListener("keydown", (e) => { if (e.code === "Escape") closeChat(); e.stopPropagation(); });
+chatInput.addEventListener("blur", () => { chatForm.hidden = true; });
+addEventListener("keydown", (e) => {
+    const typing = e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(e.target.tagName);
+    if (screen === "play" && chatForm.hidden && !typing && (settings.bindings.chat || []).includes(e.code)) { e.preventDefault(); openChat(); }
+});
+client.on("chat", (m) => {
+    const info = client.players.get(m.id), b = document.createElement("b"), t = document.createElement("span");
+    b.textContent = m.name + ": "; t.textContent = m.text;
+    hud.feed(b.outerHTML + t.outerHTML, info ? info.team : -1);
+    sound.click();
+});
+
 // ------------------------------------------------------------------ the fixed step
 let lastButtons = 0;
 game.onUpdate(() => {
@@ -333,7 +473,8 @@ game.onRender((dt, alpha) => {
     const wet = me.water >= 2 ? 1 : 0;
     if (wet !== fx.wasWater && me.alive) { world.splash(me.x, me.y, tide.level, wet ? Math.min(1.5, 0.4 + Math.abs(me.vz) / 6) : 0.4); sound.play("splash", wet ? 0.8 : 0.4); }
     // low breath: a beep each second, the rest of the mix dipped under it, and a caption
-    if (me.alive && me.breath < WATER.breath * TICK_RATE * 0.35 && (fx.breathBeep -= dt) <= 0) { fx.breathBeep = 1; sound.play("breath", 0.7, 1 + (1 - me.breath / (WATER.breath * TICK_RATE * 0.35)) * 0.5); sound.dip(-4, 0.5); sound.caption("[Beeping: out of breath]", 1); }
+    const full = WATER.breath * TICK_RATE * (me.assist ? 1.5 : 1);
+    if (me.alive && me.breath < full * 0.35 && (fx.breathBeep -= dt) <= 0) { fx.breathBeep = 1; sound.play("breath", 0.7, 1 + (1 - me.breath / (full * 0.35)) * 0.5); sound.dip(-4, 0.5); sound.caption("[Beeping: out of breath]", 1); }
     if (!fx.wasGround && me.ground && me.alive && fx.vz < -9) sound.play("land", Math.min(1, (-fx.vz - 6) / 12));
     fx.wasGround = me.ground; fx.vz = me.vz;
     sound.listen(camera);
@@ -392,6 +533,7 @@ function nearestLoot(me) {
     return reachableLoot(lootView, me);
 }
 
+applySettings();
 show("title");
 // the island behind the title screen: any seed will do
 world.loadIsland(generateIsland(20261020, 4));

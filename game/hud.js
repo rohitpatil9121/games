@@ -141,7 +141,7 @@ export class Hud {
         }
 
         // ---- breath
-        const breath = me.breath / (WATER.breath * TICK_RATE);
+        const breath = me.breath / (WATER.breath * TICK_RATE * (me.assist ? 1.5 : 1));
         this.set("breath", Math.round(breath * 100), (b) => { el["breath-fill"].style.width = b + "%"; el.breath.classList.toggle("on", b < 100); el.breath.classList.toggle("low", b < 35); });
 
         // ---- blind: a white-out that fades
@@ -209,7 +209,7 @@ export class Hud {
             for (const info of [...c.players.values()].filter((p) => p.team === t).sort((a, b) => b.banked - a.banked)) {
                 const tr = document.createElement("tr");
                 if (info.id === c.id) tr.className = "me";
-                const cells = [info.name + (info.bot ? " (bot)" : ""), "", info.banked, info.lost, info.steals, info.shoves, info.bot ? "" : info.ping];
+                const cells = [info.name + (info.bot ? " (bot)" : "") + (info.assist ? " (assist)" : ""), "", info.banked, info.lost, info.steals, info.shoves, info.bot ? "" : info.ping];
                 for (const v of cells) { const td = document.createElement("td"); td.textContent = v; tr.append(td); }
                 rows.push(tr);
             }

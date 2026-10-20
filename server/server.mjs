@@ -142,7 +142,7 @@ wss.on("connection", (ws, req) => {
         if (target.full) { refuse(`Room ${target.code} is full.`); return; }
         clearTimeout(timer);
         room = target;
-        id = room.join((out) => { if (ws.readyState === 1) ws.send(out); }, cleanText(m.name, NAME_MAX));
+        id = room.join((out) => { if (ws.readyState === 1) ws.send(out); }, cleanText(m.name, NAME_MAX), m.assist === true);
     });
 
     ws.on("close", () => {
