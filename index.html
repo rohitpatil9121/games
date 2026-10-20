@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Games on Projection Lab</title>
+<style>
+  :root { --ink: #f4efe4; --dim: rgba(244, 239, 228, 0.7); --sand: #e8d6a8; }
+  body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #123544, #0b1820); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; display: grid; place-items: center; }
+  main { max-width: 720px; padding: 32px 16px; }
+  h1 { font-size: clamp(32px, 6vw, 52px); margin: 0 0 8px; letter-spacing: 0.04em; }
+  p { color: var(--dim); }
+  a.card { display: block; margin-top: 24px; padding: 20px 22px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.15); color: inherit; text-decoration: none; }
+  a.card:hover, a.card:focus-visible { border-color: var(--sand); outline: none; }
+  a.card h2 { margin: 0; letter-spacing: 0.1em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Games</h1>
+  <p>Browser games on Projection Lab, my own WebGL engine.</p>
+  <a class="card" href="tidefall/">
+    <h2>TIDEFALL</h2>
+    <p>The sea goes out. The ruins come up. Get back before it returns. Raid with up to 8 players, or practise against bots right here in the browser.</p>
+  </a>
+</main>
+</body>
+</html>
