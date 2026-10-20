@@ -130,7 +130,7 @@ own position, at most 30 m) and every weight; messages are rate-limited and inpu
 | Traffic per client, 8 players, a minute of low tide | **3.5 kB/s down**, 1.0 kB/s up (62.4 down as JSON text) |
 | Frame, 8 players and the island in view, 1280 × 720, Intel UHD integrated graphics | **1.6 ms** median GPU-synced, 12.8 ms worst of 30 (`tools/inspect.mjs`) |
 | Draw calls / shadow draws / triangles in that view | 84 / 27 / 179 k |
-| Download | 1.34 MB of files (1.05 MB transferred, no compression); itch zip 419 KB |
+| Download and load | 1.34 MB of files, 77 requests, 1.0 MB transferred uncompressed; playable 0.9–1.0 s after opening on localhost (no network delay counted); itch zip 419 KB |
 | Server tick, 8 bots thinking | 0.35 ms average, 14.4 ms worst, none over 16 ms in 216 minutes of bot play |
 | Bot balance, 24 matches of 4 teams of 2 (fresh seeds) | wins by camp 4 / 8 / 4 / 8, average bank 602 to 728; 3% of carried loot lost to the sea, 15 heavy loads taken by the flood, 6 drownings |
 
