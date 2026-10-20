@@ -100,3 +100,7 @@ body[data-phase="flood"] #tide-line { color: var(--flood); }
 #debug { position: absolute; left: var(--safe-l); top: calc(var(--safe-t) + 80px); margin: 0; font: 12px "JetBrains Mono", monospace; color: #cfe; }
 @media (max-width: 700px) { #banks li { font-size: 13px; } #banks { min-width: 0; } #tide-line { font-size: 16px; } #feed { top: 30%; font-size: 12px; } }
 @media (prefers-reduced-motion: reduce) { #flood-warn.on, #breath.low i { animation: none; } #notice.show { animation: none; } }
+#caption { position: absolute; left: 50%; bottom: calc(var(--safe-b) + 120px); transform: translateX(-50%); padding: 4px 12px; background: rgba(0, 0, 0, 0.6); border-radius: 4px; font-size: 15px; opacity: 0; transition: opacity 0.2s; white-space: nowrap; }
+#caption.on { opacity: 1; }
+#tip { position: absolute; left: var(--safe-l); top: calc(var(--safe-t) + 4px); max-width: min(380px, 42vw); padding: 10px 14px; background: rgba(6, 20, 28, 0.78); border-left: 3px solid var(--low); border-radius: 4px; font-size: 15px; line-height: 1.35; opacity: 0; transform: translateY(-6px); transition: opacity 0.3s, transform 0.3s; }
+#tip.on { opacity: 1; transform: none; }

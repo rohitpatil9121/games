@@ -23,7 +23,7 @@ export class Hud {
         this.client = client;
         this.el = {};
         for (const id of ["tide-pips", "tide-phase", "tide-time", "tide-bar", "tide-mark", "tide-trend", "banks", "carry-items", "carry-bar", "carry-fill", "carry-label", "compass", "compass-arrow",
-            "compass-text", "breath", "breath-fill", "prompt", "notice", "feed", "markers", "blind", "scores", "scores-title", "scores-sub", "scores-body", "debug", "crosshair", "flood-warn"]) this.el[id] = $(id);
+            "compass-text", "breath", "breath-fill", "prompt", "notice", "feed", "markers", "blind", "scores", "scores-title", "scores-sub", "scores-body", "debug", "crosshair", "flood-warn", "caption", "tip"]) this.el[id] = $(id);
         // the tide bar: four segments sized by their share of a cycle
         this.el["tide-bar"].replaceChildren(...TIDE.phases.map((p, i) => { const s = document.createElement("i"); s.className = PHASE_CLASS[i]; s.style.flexGrow = String(p.seconds); s.title = p.name; return s; }));
         this.el["tide-pips"].replaceChildren(...Array.from({ length: TIDE.tides }, () => document.createElement("i")));
@@ -47,6 +47,23 @@ export class Hud {
     name(id) { return this.client.players.get(id)?.name || "someone"; }
 
     notice(text, seconds = 3) { this.el.notice.textContent = text; this.noticeLeft = seconds; this.el.notice.classList.remove("show"); void this.el.notice.offsetWidth; this.el.notice.classList.add("show"); }
+
+    /** A caption for a sound (accessibility): bottom centre, a few seconds. */
+    caption(text, seconds = 2) {
+        const el = this.el.caption;
+        if (!el) return;
+        el.textContent = text; el.classList.add("on");
+        clearTimeout(this._captionTimer);
+        this._captionTimer = setTimeout(() => el.classList.remove("on"), seconds * 1000);
+    }
+
+    /** A first-match tip (game/tutorial.js). */
+    tip(text, seconds = 6) {
+        const el = this.el.tip;
+        el.textContent = text; el.classList.add("on");
+        clearTimeout(this._tipTimer);
+        this._tipTimer = setTimeout(() => el.classList.remove("on"), seconds * 1000);
+    }
 
     /** A line in the feed (newest at the bottom, five kept, each fading after a while). */
     feed(html, team = -1) {

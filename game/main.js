@@ -1,5 +1,5 @@
 import { Game, Camera, PostFX } from "../engine/index.js";
-import { LOOT, LOOT_KINDS, TICK_RATE, BTN, MATCH, TOOLS, TEAM_NAMES, teamColor } from "./data.js";
+import { LOOT, LOOT_KINDS, TICK_RATE, BTN, MATCH, TOOLS, WATER, TEAM_NAMES, teamColor } from "./data.js";
 import { quantizeYaw, quantizePitch } from "./det.js";
 import { reachableLoot } from "./sim.js";
 import { tideAt, matchLeft, waterAt } from "./tide.js";
@@ -8,7 +8,9 @@ import { Client, Loopback, SocketTransport, Conditions } from "./net.js";
 import { PROTOCOL, NAME_MAX, cleanText } from "./protocol.js";
 import { World } from "./world.js";
 import { loadCharacters } from "./characters.js";
-import { Controls, defaultBindings } from "./controls.js";
+import { Sound } from "./sound.js";
+import { Tutorial } from "./tutorial.js";
+import { Controls, defaultBindings, keyHint } from "./controls.js";
 import { ThirdPerson } from "./camera.js";
 import { Hud } from "./hud.js";
 import { FLAG } from "./protocol.js";
@@ -46,6 +48,16 @@ const controls = new Controls(input, canvas, settings);
 const view = controls.view;
 const rig = new ThirdPerson(camera);
 const hud = new Hud(client);
+save.tutorial = save.tutorial || { seen: [], done: false };
+const tutorial = new Tutorial(save.tutorial, (text, seconds) => hud.tip(text, seconds));
+const keyName = (id) => (id === "move" ? ["forward", "left", "back", "right"].map((a) => keyHint(settings.bindings, a)).join("") : keyHint(settings.bindings, id)) || id;
+const sound = new Sound({ volume: settings.volume ?? 0.8 });
+sound.captions = settings.captions ?? true;
+sound.onCaption = (text, seconds) => hud.caption(text, seconds);
+// browsers allow sound only after a click or a key press
+for (const type of ["pointerdown", "keydown"]) addEventListener(type, () => sound.start(), { once: true });
+// every button clicks
+document.addEventListener("click", (e) => { if (e.target instanceof HTMLElement && e.target.closest("button")) sound.click(e.target.closest("button").id === "leave"); });
 
 // ------------------------------------------------------------------ screens
 let screen = "title";
@@ -187,7 +199,11 @@ client.on("close", (reason) => {
     probe().then(() => { $("server-status").textContent = (reason || "Disconnected.") + (was && online.up ? ` Press Join to go back to room ${was}.` : ""); });
 });
 client.on("event", onEvent);
-client.on("predicted", () => { /* sounds for my own jump and grapple, at once (stage 8) */ });
+// my own jump and grapple sound the moment they happen, not when the server agrees
+client.on("predicted", (e) => {
+    if (e.type === "jump") sound.play("jump", 0.6);
+    else if (e.type === "hook") { sound.play(e.hit ? "hook" : "miss", 0.8); if (e.hit) setTimeout(() => sound.at("clank", e.x, e.y, e.z, 0.8), 120); }
+});
 
 /** flares burning, as this client was told: { id, team, x, y, z, until } */
 const flares = [];
@@ -209,33 +225,43 @@ function onEvent(e) {
     switch (e.type) {
         case "over":
             notice(e.winner < 0 ? "A draw" : e.winner === me.team ? "Your team wins" : `${TEAM_NAMES[e.winner]} wins`, 6);
+            sound.play(e.winner === me.team ? "win" : "lose", 0.9);
             break;
         case "phase":
-            if (e.phase === 0) notice(`Tide ${e.tide + 1} of 6: the sea goes out`, 3);
-            else if (e.phase === 1) notice("Low tide: everything is open", 2.5);
-            else if (e.phase === 2) notice("The flood is coming", 3);
-            else if (e.phase === 3) notice("High tide", 2);
+            if (e.phase === 0) { notice(`Tide ${e.tide + 1} of 6: the sea goes out`, 3); sound.play("chime", 0.6); sound.caption("[Bell: the sea goes out]", 2); }
+            else if (e.phase === 1) { notice("Low tide: everything is open", 2.5); sound.play("chime", 0.5, 1.5); }
+            else if (e.phase === 2) { notice("The flood is coming", 3); sound.hornBlast(true); }
+            else if (e.phase === 3) { notice("High tide", 2); sound.hornBlast(false); }
             break;
         case "pick":
-            if (mine) world.glint(me.x, me.y, me.z + 1, [1, 0.85, 0.4]);
+            if (mine) { world.glint(me.x, me.y, me.z + 1, [1, 0.85, 0.4]); sound.play(e.kind === 1 ? "coins" : "pick", 0.8, e.kind === 3 ? 0.8 : 1); }
+            else if (whereIs(e.id, spot)) sound.at(e.kind === 1 ? "coins" : "pick", spot.x, spot.y, spot.z + 1, 0.6);
+            break;
+        case "nopick":
+            if (mine) sound.play("miss", 0.5);
             break;
         case "bank": {
             const c = island.camps[e.team];
             world.glint(c.x, c.y, c.z + 1, teamColor(e.team), 60);
             hud.feed(`${hud.who(e.id)} banked <b>${e.value}</b>`, e.team);
-            if (mine) { game.juice.shake(0.12); notice(`Banked ${e.value}`, 2); }
+            if (mine) { game.juice.shake(0.12); notice(`Banked ${e.value}`, 2); sound.play("bank", 0.9); sound.play("coins", 0.6, 0.9); }
+            else sound.at("bank", c.x, c.y, c.z + 1, 0.8);
             break;
         }
         case "drop":
-            if (e.why === "gasp" && whereIs(e.id, spot)) world.sink(spot.x, spot.y, spot.z);
+            if (e.why === "gasp" && whereIs(e.id, spot)) { world.sink(spot.x, spot.y, spot.z); sound.at("sink", spot.x, spot.y, spot.z, 0.8); }
+            if (e.why === "drop" && whereIs(e.id, spot)) sound.at("drop", spot.x, spot.y, spot.z, 0.7);
+            if (e.why === "gasp" && mine) { sound.play("gasp", 0.9); sound.caption("[Gasp: the heavy loot sinks]", 2.5); }
             if (e.why === "gasp") { if (mine) { game.juice.shake(0.25); notice("Out of breath: the heavy loot sinks", 3); } else hud.feed(`${hud.who(e.id)} lost loot to the sea`, team(e.id)); }
             break;
         case "drown":
-            if (mine) notice("Drowned. Back to camp", 3); else hud.feed(`${hud.who(e.id)} drowned`, team(e.id));
+            if (mine) { notice("Drowned. Back to camp", 3); sound.play("drown", 0.8); } else hud.feed(`${hud.who(e.id)} drowned`, team(e.id));
             break;
         case "shove":
-            if (e.id !== me.id) world.shove(e.id);
+            if (e.id !== me.id) { world.shove(e.id); if (whereIs(e.id, spot)) sound.at("whoosh", spot.x, spot.y, spot.z + 1, 0.7); }
             if (!e.target) break;
+            if (whereIs(e.target, spot)) sound.at("shove", spot.x, spot.y, spot.z + 1, e.behind ? 1.2 : 0.9);
+            if (e.target === me.id) sound.caption(e.behind ? "[Thud: shoved from behind]" : "[Thud: shoved]", 1.5);
             if (whereIs(e.target, spot)) world.puff(spot.x, spot.y, spot.z, client.level(client.clock) > spot.z + 0.8);
             if (e.target === me.id) { game.juice.shake(e.behind ? 0.55 : 0.35); notice(e.behind ? "Shoved from behind!" : "Shoved!", 1.5); }
             if (mine) game.juice.shake(0.15);
@@ -243,13 +269,18 @@ function onEvent(e) {
             break;
         case "flare":
             world.flare(e.x, e.y, e.z, teamColor(e.team), TOOLS.flare.mark);
+            sound.at("flare", e.x, e.y, e.z, 1);
+            if (e.team !== me.team) sound.caption("[Hiss: a rival flare]", 1.5);
             flares.push({ id: ++flareIds, team: e.team, x: e.x, y: e.y, z: e.z, until: performance.now() + TOOLS.flare.mark * 1000 });
             break;
         case "blind":
-            if (e.id === me.id) game.juice.shake(0.2);
+            if (e.id === me.id) { game.juice.shake(0.2); sound.play("blind", 0.7); }
             break;
         case "hook":
-            if (!mine && !e.hit) break;
+            if (!mine && whereIs(e.id, spot)) { sound.at("hook", spot.x, spot.y, spot.z + 1.5, 0.7); if (e.hit) sound.at("clank", e.x, e.y, e.z, 0.7); }
+            break;
+        case "jump":
+            if (!mine && whereIs(e.id, spot)) sound.at("jump", spot.x, spot.y, spot.z, 0.6);
             break;
         default: break;
     }
@@ -272,7 +303,7 @@ game.onUpdate(() => {
 });
 
 // ------------------------------------------------------------------ drawing
-const at = { x: 0, y: 0, z: 0, vx: 0, vy: 0 }, tide = {}, fx = { fov: 0, wasWater: 0 };
+const at = { x: 0, y: 0, z: 0, vx: 0, vy: 0 }, tide = {}, fx = { fov: 0, wasWater: 0, breathBeep: 0, wasGround: true, vz: 0 };
 let since = 1;
 
 game.onRender((dt, alpha) => {
@@ -283,6 +314,7 @@ game.onRender((dt, alpha) => {
         camera.mode = "orbit"; camera.target.set([0, 0, 2]); camera.distance = 120; camera.pitch = 0.32; camera.yaw += dt * 0.03;
         camera.update(0);
         if (world.island) world.setWater(waterAt(world.island.seed, 42 * 60), 42 * 60, 0, camera.eye);
+        sound.update({ phase: 3, level: 0, shore: 30, height: 20, under: 0, playing: false });
         world.update(dt);
         return;
     }
@@ -299,12 +331,23 @@ game.onRender((dt, alpha) => {
 
     // splashes for my own player
     const wet = me.water >= 2 ? 1 : 0;
-    if (wet !== fx.wasWater && me.alive) world.splash(me.x, me.y, tide.level, wet ? Math.min(1.5, 0.4 + Math.abs(me.vz) / 6) : 0.4);
+    if (wet !== fx.wasWater && me.alive) { world.splash(me.x, me.y, tide.level, wet ? Math.min(1.5, 0.4 + Math.abs(me.vz) / 6) : 0.4); sound.play("splash", wet ? 0.8 : 0.4); }
+    // low breath: a beep each second, the rest of the mix dipped under it, and a caption
+    if (me.alive && me.breath < WATER.breath * TICK_RATE * 0.35 && (fx.breathBeep -= dt) <= 0) { fx.breathBeep = 1; sound.play("breath", 0.7, 1 + (1 - me.breath / (WATER.breath * TICK_RATE * 0.35)) * 0.5); sound.dip(-4, 0.5); sound.caption("[Beeping: out of breath]", 1); }
+    if (!fx.wasGround && me.ground && me.alive && fx.vz < -9) sound.play("land", Math.min(1, (-fx.vz - 6) / 12));
+    fx.wasGround = me.ground; fx.vz = me.vz;
+    sound.listen(camera);
+    sound.update({ phase: tide.phase, level: tide.level, shore: Math.abs(groundAt(island, camera.eye[0], camera.eye[1]) - tide.level) * 9, height: camera.eye[2], under: rig.under > 0.5 ? 1 : 0, playing: true, over: client.match.phase === "over" });
     fx.wasWater = wet;
 
     const steps = world.drawPlayers(client, at, dt);
     // footfalls kick up sand on dry ground
-    for (const id of steps) { const c = world.carriers.get(id); if (c && c.z > tide.level) world.kick(c.x, c.y, c.z, 4); }
+    for (const id of steps) {
+        const c = world.carriers.get(id);
+        if (!c) continue;
+        if (c.z > tide.level) { world.kick(c.x, c.y, c.z, 4); sound.at("step", c.x, c.y, c.z, id === client.id ? 0.7 : 0.5); }
+        else sound.at("stroke", c.x, c.y, tide.level, 0.6);
+    }
     // ropes: mine from prediction, the others' from their snapshot rows
     world.beginRopes();
     if (me.hook && me.alive) world.rope(at.x, at.y, at.z + 1.3, me.hx, me.hy, me.hz);
@@ -335,6 +378,7 @@ game.onRender((dt, alpha) => {
             + `\nping ${client.ping} ms  in ${(n.bytesIn / 1000).toFixed(1)} kB/s  out ${(n.bytesOut / 1000).toFixed(1)} kB/s  ${n.snaps} snaps/s`
             + `\nreplayed ${n.replayed}  corrections ${n.corrections}  last error ${n.lastError.toFixed(3)} m   match left ${Math.ceil(matchLeft(client.clock))} s`;
     }
+    if (tutorial.update(dt, { me, island, tide, near, banked: client.players.get(client.id)?.banked || 0, keys: keyName })) persist();
     hud.update(dt, { camera, width: canvas.clientWidth, height: canvas.clientHeight, viewYaw: view.yaw, scores: controls.active && input.isDown("scores"), flares, debug });
 });
 const sample = {};
@@ -355,7 +399,7 @@ await loadCharacters().catch((e) => console.warn("characters", e));
 game.start();
 
 /** console hook, for poking at the game and for the tools */
-window.tidefall = { game, world, client, controls, view, rig, input, save, settings, conditions, startPractice, playOnline, online, show, resume,
+window.tidefall = { game, world, client, sound, controls, view, rig, input, save, settings, conditions, startPractice, playOnline, online, show, resume,
     get room() { return room; }, get screen() { return screen; }, debug() { startPractice(); return "ok"; },
     /** Practice only: jump the match to a tick and put me somewhere, looking somewhere (for screenshots and checks) */
     stage(tick, x, y, yaw = view.yaw, pitch = view.pitch) {

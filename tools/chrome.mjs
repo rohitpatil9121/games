@@ -37,7 +37,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function launch(options = {}) {
     const profile = await mkdtemp(join(tmpdir(), "projection-lab-"));
     const args = [
-        "--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
+        "--headless=new", "--remote-debugging-port=0", "--autoplay-policy=no-user-gesture-required", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
         "--mute-audio", "--hide-scrollbars", "--ignore-gpu-blocklist", "--enable-webgl",
         // software WebGL works on machines with no GPU (CI); slower, but the same code paths
         ...(options.gpu ? ["--enable-gpu"] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]),

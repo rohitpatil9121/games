@@ -120,7 +120,8 @@ export class Audio {
         const pan = this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : null;
         if (pan) { pan.pan.value = Math.max(-1, Math.min(1, opts.pan ?? 0)); src.connect(pan).connect(gain); }
         else src.connect(gain);
-        gain.connect(this.channels.sfx);
+        // TIDEFALL: a sound can be sent to another bus than sfx (opts.bus, a node the caller made)
+        gain.connect(opts.bus || this.channels.sfx);
         src.start();
         return src;
     }

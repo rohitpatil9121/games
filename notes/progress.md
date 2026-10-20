@@ -157,3 +157,29 @@ Not done yet: the flood never caught a bot (0 lost to the sea), so greed isn't b
 *less*; camps 2 and 3 banked less in both matches (needs more matches to tell bad luck from unfairness);
 the 79 ms worst tick needs fields spread over ticks. Then stages 7 (looks), 8 (audio, HUD polish),
 9 (net-test at 150 ms, settings, rebinding, touch, README, THIRD_PARTY, QA report).
+
+## Stage 6 finished, stages 7 and 8 (see NOTES.md for the skills)
+
+Stage 6: greed range widened to 0.7–1.6 and applied on the way home too (the flood now catches bots:
+7 heavy-loot losses and 2 drownings in 12 matches, from 0); a budget of one travel field per tick across
+all bots; a 2.5 s guard after being shoved (bots were stripping carriers with chains of shoves: 559 shoves
+and 297 steals in 12 matches). Balance runs: see the stage-9 report.
+
+Stage 7 (looks): `tools/make-models.mjs` writes `assets/models/raider.glb` (2,908 triangles, 219 KB,
+11 clips); `game/gfx.js` (terrain with ripples, wet sand, foam line, caustics; water with depth colour
+from a 16-bit height texture, shore foam, fresnel, glint, an underwater ceiling; stone and planks with
+tide marks, moss, weed, barnacles; a sky that turns to sunset); the sun crosses the sky over the match;
+`game/models.js` (loot with three distinct silhouettes, palms, rocks, camp with tent, chest, flag, fire,
+kelp, rubble, driftwood, shells, grass). Measured with `tools/inspect.mjs` (the QA skill's metrics
+computed in the page; Playwright would have meant a download): see the scorecard in the stage-7 report.
+Shadows were the whole frame cost (11.8 ms of a 1280x720 frame; 2.2 without them): the terrain no longer
+casts (it receives), two cascades at 1536 instead of three at 2048: 1.6 ms median, GPU-synced, with 8
+players in view, on this machine.
+
+Stage 8 (audio): `game/sound.js`, buses master/music/sfx/ui/ambience plus the horn, levels in dB, the
+horn ducks the rest by 9 dB, low breath by 4 dB; layered music (pad, pulse, drums, rising line) glides
+by tide phase and opens a filter as the water rises; surf and wind synthesised; every action has a sound,
+spatial by the camera; captions for the horn, bell, shoves, rival flares, low breath and the gasp. Engine
+change (in this copy): `Audio.play` takes `opts.bus`. First-two-minutes tips: `game/tutorial.js`.
+Checked in headless Chrome: the audio context runs, the horn ducks to 0.355 (-9 dB), the sequencer
+advances, the caption shows. Not checked: how any of it sounds; I can't listen.

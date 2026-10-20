@@ -100,8 +100,9 @@ export function campParts(cx, cy, cz, facing, teamColor) {
     const at = (fx, fy, fz) => [cx + fx * c - fy * s, cy + fx * s + fy * c, cz + fz];
     const tc = [...teamColor, 1];
     // tent: a pyramid of canvas in the team colour, a dark doorway, guy ropes as thin boxes
-    parts.push(part(primitives.cone(2.0, 2.4, 4), at(-4.2, 2.2, 1.2), tc, [0, 0, facing + PI / 4]));
-    parts.push(part(primitives.box(0.05, 0.8, 1.1), at(-2.75, 2.2, 0.55), [0.12, 0.09, 0.08, 1], [0, 0, facing]));
+    // (off to the side, so it is never between the camera and a player standing at the chest)
+    parts.push(part(primitives.cone(1.8, 2.3, 4), at(0.4, 5.8, 1.15), tc, [0, 0, facing + PI / 4]));
+    parts.push(part(primitives.box(0.8, 0.05, 1.05), at(0.4, 4.52, 0.52), [0.12, 0.09, 0.08, 1], [0, 0, facing]));
     // chest: a wooden body, a curved lid, iron bands and a gold lock
     const wood = [0.5, 0.32, 0.17, 0.6], iron = [0.25, 0.25, 0.27, 1];
     parts.push(part(primitives.box(1.5, 0.9, 0.6), at(0, 0, 0.3), wood, [0, 0, facing]));
