@@ -31,7 +31,11 @@ let assets = null;
 export async function loadCharacters(base = "assets/models/") {
     if (assets) return assets;
     const asset = await loadGLTF(base + "raider.glb");
-    assets = { asset, geometry: asset.geometry("body"), upright: asset.upright };
+    // two kinds of raider.glb: the procedural one (one palette mesh, tools/make-models.mjs) and a textured one
+    // made from a generated model (body + shirt + pennant, tools/make-raider-glb.mjs)
+    const shirt = asset.mesh("shirt");
+    assets = { asset, geometry: asset.geometry("body"), upright: asset.upright, textured: !!shirt,
+        shirt: shirt && shirt.geometry, pennant: asset.geometry("pennant"), map: shirt && shirt.material.map };
     return assets;
 }
 export const charactersReady = () => !!assets;
@@ -47,6 +51,12 @@ const pick = (id, salt, n) => { let h = Math.imul(id * 2654435761 + salt * 40503
 
 let shared = null;
 const material = () => shared || (shared = new StandardMaterial({ palette: new Float32Array(StandardMaterial.PALETTE_SIZE * 3).fill(1), specular: 0.18, shininess: 16, rim: [0.5, 0.45, 0.4], rimPower: 3.5 }));
+let skin = null;
+/** the textured raider: one material for the body, one for the shirt (each raider tints it with its u_color) */
+const textured = () => skin || (skin = {
+    body: new StandardMaterial({ map: assets.map, specular: 0.12, shininess: 14, rim: [0.45, 0.42, 0.38], rimPower: 3.5 }),
+    shirt: new StandardMaterial({ map: assets.map, specular: 0.12, shininess: 14, rim: [0.45, 0.42, 0.38], rimPower: 3.5 }),
+});
 const ONE_SHOT = { shove: 0.55, hookThrow: 0.4, celebrate: 1.3, drown: 1.8 };
 
 export class Raider {
@@ -56,7 +66,7 @@ export class Raider {
         this.animator = new Animator(sk, a.asset.clips);
         this.root = new Entity({ name: "raider" });
         this.root.interpolate = false;
-        const mesh = new SkinnedMesh(a.geometry, material(), this.animator);
+        const mesh = new SkinnedMesh(a.geometry, a.textured ? textured().body : material(), this.animator);
         const P = (this.palette = new Float32Array(StandardMaterial.PALETTE_SIZE * 3));
         const hat = pick(id, 1, 3), hatColors = HAT_COLORS[hat];
         P.set(SKINS[pick(id, 2, SKINS.length)], 3);
@@ -65,11 +75,30 @@ export class Raider {
         P.set(hatColors[pick(id, 4, hatColors.length)], 12);
         P.set(LEATHER, 15); P.set(WHITE, 18); P.set(INK, 21);
         this.emissive = new Float32Array(3);
-        mesh.uniforms = { u_palette: P, u_emissive: this.emissive };
+        this.shirtColor = new Float32Array([1, 1, 1, 1]);
+        mesh.uniforms = a.textured ? { u_emissive: this.emissive } : { u_palette: P, u_emissive: this.emissive };
         this.setColor(color);
-        this.body = this.root.add(new Entity({ name: "body", mesh, cullRadius: 1.8 }));
-        this.body.interpolate = false;
-        quat.copy(this.body.rotation, a.upright);
+        const part = (name, m) => {
+            // skinning matrices from a float texture, not a uniform array: with the textured raider's three
+            // skinned meshes the uniform-array path cost ~10 ms a frame on Intel UHD (measured, 8 players), this ~1
+            if (a.textured) m.usesJointTexture = true;
+            const e = this.root.add(new Entity({ name, mesh: m, cullRadius: 1.8 }));
+            e.interpolate = false;
+            quat.copy(e.rotation, a.upright);
+            return e;
+        };
+        this.body = part("body", mesh);
+        if (a.textured) {
+            // the shirt is the texture's shirt in grey, times the team colour; the pennant is palette coloured
+            const shirt = new SkinnedMesh(a.shirt, textured().shirt, this.animator);
+            shirt.uniforms = { u_color: this.shirtColor, u_emissive: this.emissive };
+            part("shirt", shirt);
+            if (a.pennant) {
+                const pennant = new SkinnedMesh(a.pennant, material(), this.animator);
+                pennant.uniforms = { u_palette: P, u_emissive: this.emissive };
+                part("pennant", pennant);
+            }
+        }
 
         const ix = (name) => sk.index(name);
         this.bones = { hips: ix("hips"), spine: ix("spine"), chest: ix("chest"), head: ix("head"), pack: ix("pack"), flag: ix("flag"), hairB: ix("hairB"),
@@ -79,10 +108,12 @@ export class Raider {
         // the look: one hat, one hairstyle (or none under a cap), maybe a beard; the rest scaled away
         const hair = pick(id, 5, 4);
         this.hidden = [];
+        this.face = this.bones.lids >= 0;
         ["hatA", "hatB", "hatC"].forEach((n, k) => { if (k !== hat) this.hidden.push(ix(n)); });
         ["hairA", "hairB", "hairC"].forEach((n, k) => { if (k !== hair) this.hidden.push(ix(n)); });
         if (pick(id, 6, 3) !== 0) this.hidden.push(ix("beard"));
-        this.look = { hat, hair, beard: !this.hidden.includes(ix("beard")) };
+        this.look = a.textured ? { hat: 0, hair: 0, beard: false } : { hat, hair, beard: !this.hidden.includes(ix("beard")) };
+        this.hidden = this.hidden.filter((j) => j >= 0);
 
         this.stride = 0;
         this.oneShot = null; this.oneShotLeft = 0;
@@ -92,7 +123,7 @@ export class Raider {
         this.animator.play("idle", { fade: 0 });
     }
 
-    setColor(c) { this.palette.set(c, 0); }
+    setColor(c) { this.palette.set(c, 0); this.shirtColor.set(c, 0); }
 
     /** Play a one-shot clip over whatever else (shove, hookThrow, celebrate, drown). */
     play(name) { if (name === "celebrate") this.gladFor = 2.2; this.oneShot = name; this.oneShotLeft = ONE_SHOT[name] || 0.5; this.animator.play(name, { fade: 0.05, loop: false, restart: true }); }
@@ -156,7 +187,7 @@ export class Raider {
         if (this.freezeAt !== undefined) { an.time = this.freezeAt; an._prev = null; an.sample(0); } else an.sample(dt);
         const pose = an.pose, b = this.bones;
         for (const j of this.hidden) { const o = j * POSE_STRIDE + 7; pose[o] = pose[o + 1] = pose[o + 2] = 0; }
-        { const o = b.pack * POSE_STRIDE + 7; pose[o] = pose[o + 1] = pose[o + 2] = this.pack; }
+        if (b.pack >= 0) { const o = b.pack * POSE_STRIDE + 7; pose[o] = pose[o + 1] = pose[o + 2] = this.pack; }
         // lean (about the side axis) at the spine, bank (about the forward axis) at the hips; a flap and a swing
         rotate(pose, b.spine, 1, 0, 0, -this.lean);
         rotate(pose, b.hips, 0, 0, -1, this.bank);
@@ -171,7 +202,9 @@ export class Raider {
         const scared = (f & FLAG.stun) || (f & FLAG.sunk) || this.oneShot === "drown" || ((f & FLAG.swim) && heavy) || !alive;
         this.fear += ((scared ? 1 : 0) - this.fear) * k(8);
         this.glad += ((this.gladFor > 0 && !scared ? 1 : 0) - this.glad) * k(8);
-        const show = (bone, v) => { const o = bone * POSE_STRIDE + 7; pose[o] = pose[o + 1] = pose[o + 2] = v; };
+        const show = (bone, v) => { if (bone < 0) return; const o = bone * POSE_STRIDE + 7; pose[o] = pose[o + 1] = pose[o + 2] = v; };
+        // (a textured raider has its face painted on: no face bones)
+        if (this.face) {
         // lids: closed for a blink, half down when glad (a squint), wide open when scared
         { const o = b.lids * POSE_STRIDE + 7; pose[o] = 1; pose[o + 2] = 1; pose[o + 1] = Math.max(closing, this.glad * 0.45) * (1 - this.fear * 0.8) + 0.001; }
         // brows up when scared or glad; pupils small when scared
@@ -180,6 +213,7 @@ export class Raider {
         show(b.mouth, this.fear > 0.5 || this.glad > 0.5 ? 0 : 1);
         show(b.smile, this.glad > 0.5 ? 1 : 0);
         show(b.gasp, this.fear > 0.5 ? 1 : 0);
+        }
         an.solve();
         // the squash is at the feet: the root's origin is the feet, so scaling it keeps them planted
         const q = this.squash * 0.16;
