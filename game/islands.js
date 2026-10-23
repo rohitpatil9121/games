@@ -36,6 +36,14 @@ export const PROTOTYPE = Object.freeze({
     /** the soil patch beside the hut: tiles you may till, and the six already tilled */
     field: { x0: 3, y0: -5, x1: 10, y1: 2 },
     tilled: [[4, -3], [5, -3], [6, -3], [4, -2], [5, -2], [6, -2]],
+    /** worn paths (for the ground's colour and where grass is short): hut to field, field to shed, out to the east cliff */
+    paths: [
+        { points: [[-2.4, -2], [0.5, -1.6], [2.7, -1.2]], width: 0.75 },
+        { points: [[3.2, 2.6], [3.4, 5.5], [3.8, 7.8]], width: 0.6 },
+        { points: [[10.5, 0], [17, 2.6], [25, 5.5]], width: 0.5 },
+    ],
+    /** the home tree: a big old oak on the west side, the island's landmark until the windmill turns */
+    tree: { x: -15, y: 8, seed: 7, height: 15 },
     /** where you wake */
     wake: { x: -7.4, y: -1.2, yaw: 0 },
     items: [

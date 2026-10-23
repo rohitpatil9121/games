@@ -8,7 +8,7 @@ import * as post from "../shaders/postprocessing/post.js";
  *   scene ──► [HDR target + depth texture]
  *               ├─► ambient occlusion ½ (from depth) ─► blur ─► ao      (optional, settings.ao)
  *               ├─► bright pass ½ ─► blur ─► mip0 ─► ¼ ─► blur ─► mip1 ─► ⅛ ─► blur ─► mip2
- *               └──────────────── composite (+ mips, exposure, tone map, grading, vignette, grain, AA) ─► screen
+ *               └──────────────── composite (+ mips, exposure, tone map, grading, LUT, vignette, grain, AA) ─► screen
  *
  * Bloom is "selective" by brightness: only values above `threshold` bleed. With an HDR target, emissive
  * colours brighter than 1.0 (e.g. emissive × 3) glow while ordinary lit surfaces don't.
@@ -33,6 +33,13 @@ export const POSTFX_DEFAULTS = Object.freeze({
     saturation: 1.0,
     /** 1 = unchanged; above 1 pushes darks and lights apart around mid grey */
     contrast: 1.0,
+    /**
+     * optional creative grade after tone mapping: a 32-cube colour lookup stored as a 1024 × 32 strip (32 slices
+     * along x, blue picks the slice), display-referred in and out; lutAmount blends it in. Added for SKYFARM.
+     * @type {import("./Texture.js").Texture | null}
+     */
+    lut: null,
+    lutAmount: 1,
     vignette: 0.25,
     grain: 0.025,
     aberration: 0,
@@ -194,6 +201,8 @@ export class PostFX {
         c.set("u_tonemap", s.tonemap === true || s.tonemap === "aces" ? 1 : s.tonemap === "reinhard" ? 2 : 0);
         c.set("u_saturation", s.saturation ?? 1);
         c.set("u_contrast", s.contrast ?? 1);
+        if (s.lut) { s.lut.bind(gl, 5); c.set("u_lut", 5); }
+        c.set("u_lutAmount", s.lut ? s.lutAmount ?? 1 : 0);
         c.set("u_vignette", s.vignette);
         c.set("u_grain", s.grain);
         c.set("u_aberration", s.aberration);

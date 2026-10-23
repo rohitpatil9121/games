@@ -96,7 +96,18 @@ uniform float u_contrast;      // 1 = unchanged
 uniform float u_antialias;     // 1 = on
 uniform sampler2D u_ao;        // ambient occlusion (white = open)
 uniform float u_aoStrength;    // 0 = off
+uniform sampler2D u_lut;       // 32-cube grade as a 1024 x 32 strip
+uniform float u_lutAmount;     // 0 = off
 varying vec2 v_uv;
+
+vec3 applyLut(vec3 c) {
+    c = clamp(c, 0.0, 1.0);
+    float b = c.b * 31.0, s0 = floor(b), s1 = min(s0 + 1.0, 31.0);
+    float x = c.r * 31.0 + 0.5, y = (c.g * 31.0 + 0.5) / 32.0;
+    vec3 a = texture2D(u_lut, vec2((s0 * 32.0 + x) / 1024.0, y)).rgb;
+    vec3 d = texture2D(u_lut, vec2((s1 * 32.0 + x) / 1024.0, y)).rgb;
+    return mix(a, d, b - s0);
+}
 
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
@@ -144,6 +155,7 @@ void main() {
     col = u_tonemap > 1.5 ? col / (1.0 + col) : (u_tonemap > 0.5 ? aces(col) : clamp(col, 0.0, 1.0));
     col = mix(vec3(luma(col)), col, u_saturation);
     col = max((col - 0.5) * u_contrast + 0.5, 0.0);
+    if (u_lutAmount > 0.0) col = mix(col, applyLut(col), u_lutAmount);
     vec2 q = v_uv - 0.5;
     col *= 1.0 - dot(q, q) * u_vignette * 2.0;
     col += (hash(v_uv * 913.0 + fract(u_time) * 71.0) - 0.5) * u_grain;

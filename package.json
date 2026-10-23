@@ -7,6 +7,9 @@
     "start": "node tools/serve.mjs 8160",
     "test": "node tools/test.mjs",
     "playtest": "node tools/playtest.mjs",
-    "inspect": "node tools/inspect.mjs"
+    "inspect": "node tools/inspect.mjs",
+    "views": "node tools/views.mjs",
+    "views:lock": "node tools/views.mjs --lock",
+    "perf": "node tools/perf.mjs"
   }
 }

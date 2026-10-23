@@ -59,6 +59,8 @@ export class Camera {
         this.yaw = options.yaw ?? -Math.PI / 2;
         /** elevation above the XY plane in radians (Space: beta) */
         this.pitch = options.pitch ?? 0.5;
+        /** roll around the view direction, radians (positive leans the view to the right); added for SKYFARM's glide camera */
+        this.roll = options.roll ?? 0;
 
         /** first-person eye position */
         this.position = new Float64Array([0, 0, 2]);
@@ -201,6 +203,16 @@ export class Camera {
 
         Camera.basis(eye, look, this);
         for (let i = 0; i < 3; i++) this.right[i] = -this.left[i];
+        if (this.roll) {
+            // turn up and right around forward: the frame stays orthonormal and the projection is unchanged
+            const c = Math.cos(this.roll), sn = Math.sin(this.roll);
+            for (let i = 0; i < 3; i++) {
+                const u = this.up[i], r = this.right[i];
+                this.up[i] = u * c + r * sn;
+                this.right[i] = r * c - u * sn;
+                this.left[i] = -this.right[i];
+            }
+        }
         return this;
     }
 

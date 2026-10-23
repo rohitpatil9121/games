@@ -91,3 +91,73 @@ wall. What I can't judge is the feel, only the numbers; a person should try it. 
   an optional roll to `Camera` (rotate right and up around forward), which every game would get;
 - golden hour mixes a blue and an orange horizon into grey: the stage-2 sky must take its colours from the
   sun's height, not from a lerp between keys.
+
+## Stage 2: look target (one island to final quality)
+
+Skills read and used: `threejs-skill-router` (route by visual system; a no-post baseline that still reads;
+deterministic inputs), `threejs-atmosphere-aerial-perspective`, `threejs-volumetric-clouds`,
+`threejs-procedural-vegetation`, `threejs-exposure-color-grading`, `threejs-visual-validation`,
+`threejs-procedural-fields`, `threejs-procedural-geometry` / `-architecture` (by their rules), and the
+`threejs-aaa-graphics-builder` scorecard. All of them target three.js (most WebGPU/TSL); each technique below
+was rewritten as GLSL ES 1.00 for Projection Lab's `ShaderMaterial` and `PostFX`. No three.js anywhere.
+
+What was ported, and how (`game/gfx/`):
+
+| Technique (skill) | In SKYFARM |
+|---|---|
+| Sky and aerial perspective share one scattering model (atmosphere) | `atmosphere.js`: Rayleigh + Mie + ozone with Earth's coefficients, analytic optical depth through exponential density (no LUTs: the "small scene" tier). One explicit scale (atmosphere m = world m × 8). The same maths in JS gives the sun's colour, the sky light and the bounce, so lighting and haze can't disagree. Tuned in Node with `tools/atmo-tune.mjs` against the palette (noon horizon #e4ebf1 vs the target #e8f6ff). |
+| Cloud density organised by layer, per-layer wind, lit by the same sun (volumetric clouds) | `clouds.js`: **not raymarched** (see below). Cloud sea: a camera-following polar grid displaced by billow noise in world space, soft wrap light, blue hollows, silver rims, island shadows cast analytically along the sun. Cumulus: sphere clusters with flat bases and "volume normals". |
+| Rooted wind with gust fronts, blade clusters, clumps, distance tiers (vegetation) | `grass.js`: 7-blade tufts per 8 m chunk from the fields; gust fronts that travel along the wind; the player's feet push grass aside; colour root → tip; translucency; mostly the ground's normal (a meadow lights as one surface); instance counts thinned by distance. Flowers share the shader. |
+| Growth hierarchy, queue, stratified children, parallel-transport rings, crown-volume foliage normals, rooted card wind (vegetation) | `tree.js`: a 3-level oak species table, flared roots, lumpy leaf masses plus alpha-tested leaf cards that flutter about their root, whole-tree sway as a separate scope; bark measured in metres. |
+| One field drives several channels (fields) | `fields.js`: meadow, wear (paths), flowers, hue, edge; they bake the ground colour and decide where grass and flowers grow and how tall. |
+| Exposure → one tone map → LUT grade (grading) | Engine `PostFX.lut` (new, a 32-cube LUT as a 1024×32 strip after ACES); `grade.js` builds it from named moves (cool lift, warm highlights, mid-saturation "vivid" that never goes neon, a soft S). Exposure key from the light model, eased (faster up than down). |
+| Fixed views, no-post baseline, numeric comparison (validation) | `tools/views.mjs`: 6 views × noon/golden, contact sheets, canvas metrics, a 640×360 baseline diff. Re-running gives a mean difference of 0.5–0.6 / 255 and under 0.1% changed pixels, so a real change will show. |
+
+Engine changes (in this game's copy, to hand back to Projection Lab): `Camera.roll` (the glide camera leans
+10° at full bank, 3° with reduced roll, none with reduce motion) and `PostFX.lut` / `lutAmount`.
+
+Measured (`npm run perf`, this laptop's Intel UHD, headless Chrome, 1280×720, GPU-synced by readPixels after
+40 frames):
+
+| Tier | Hut door | Grass close-up | Home wide (golden) |
+|---|---|---|---|
+| Low (960×540) | 11.5 ms | 11.2 ms | 11.4 ms |
+| Medium | 14.2 ms | 14.5 ms | 11.4 ms |
+| High | 12.9 ms | 12.9 ms | 10.3 ms |
+
+Medium is inside the 16.6 ms budget with clouds, grass, haze and shadows on: 48 draws + 18 shadow draws,
+up to 500k triangles. The numbers move by about ±1.5 ms from run to run (High measuring under Medium is that
+noise). The CPU side of a frame is 0.09 ms. Ablation (`npm run perf -- --ablate`): no single system dominates;
+shadows ~0.5–3.3 ms, post ~0.6–2.3 ms, grass ~0.5–1.7 ms, the rest under 1 ms each.
+
+Honest notes:
+
+- **Volumetric clouds are not raymarched.** The skill's path (weather field, bounded march, temporal
+  reconstruction) would cost several milliseconds here even at quarter resolution, and the whole frame is
+  already 10–14 ms. The mesh clouds read as painted Ghibli clouds; the GDD's optional Medium raymarched skin
+  is dropped unless you want it measured.
+- **Low is not cheaper yet.** It renders at 0.75 resolution with one smaller shadow cascade and less grass,
+  and still costs ~11 ms, so the floor isn't fill rate. Tiers get their real tuning in stage 8 (also on a phone).
+- **Not the money shots yet:** the player is still a capsule with a scarf (the img2threejs character comes
+  with the hermits in stage 6); the HUD is stage 1's; no waterfall, water or rain.
+- Views 5 and 6 are stand-ins until stage 3 (GDD §0).
+
+Scorecard (`threejs-aaa-graphics-builder`, genre equivalents: Hero = the gardener and the glider; Obstacles = the
+air and the cliffs; Interactables = seeds, crops, plots; scored from the stage-2 sheets, the canvas metrics
+above and the renderer counts):
+
+| Category | Score | Why |
+|---|---|---|
+| Art direction | 2.5 | one palette and mood through sky, clouds, grass, roofs, rock and grade; golden hour and noon both on-model |
+| Hero / player | 1 | the glider wing is authored; the gardener is a primitive capsule (an automatic failure until stage 6) |
+| Obstacles (air, cliffs) | 1.5 | thermals and the current are visible as pollen and streaks; no storm or gust telegraphs yet |
+| Rewards / interactables | 1.5 | seeds glint, crops show stages, the tile cursor; crops are still simple shapes |
+| World / environment | 2.5 | foreground grass and flowers, a hut, fence, windmill, tree and rocks, the next island and cumulus behind, the cloud sea to the horizon |
+| Materials / textures | 2 | a shared material language (plaster, timber grain, tiles, stone courses, strata, bark, moss) |
+| Lighting / render | 2.5 | one atmosphere for sky and haze, shadows, a graded and exposed final image, a no-post baseline that reads |
+| VFX / motion | 2 | gusts across the meadow, breathing clouds, chimney smoke, motes, pollen, the tree swaying |
+| UI / HUD | 1 | stage 1's minimal HUD (stage 8) |
+| Performance evidence | 2 | per-tier GPU-synced timings, ablation, counts, budget notes |
+
+Average 1.85: not premium yet (needs 2.3, nothing below 2). The environment and light are at the bar; the
+hero, the interactables and the HUD are what hold it down, and they are later stages' work.

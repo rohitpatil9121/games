@@ -67,5 +67,10 @@ export class Rig {
             fov += 2 + kick * Math.max(0, Math.min(1, (pose.speed - GLIDE.cruise * 0.8) / (GLIDE.max - GLIDE.cruise)));
         }
         cam.fov += (fov - cam.fov) * (1 - Math.exp(-dt * 4));
+
+        // lean into turns while gliding (engine Camera.roll): 10° at full bank, 3° with "reduced roll", none with "reduce motion"
+        const maxLean = opts.reducedMotion ? 0 : opts.reducedRoll ? 0.05 : 0.17;
+        const lean = gliding ? -(pose.roll / GLIDE.maxRoll) * maxLean : 0;
+        cam.roll += (lean - cam.roll) * (1 - Math.exp(-dt * 3));
     }
 }

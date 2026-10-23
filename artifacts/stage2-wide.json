@@ -1,0 +1,26 @@
+{
+  "metrics": {
+    "colorBuckets": 139,
+    "colorEntropyBits": 4.16,
+    "edgeDensity": 0.095,
+    "luminance": {
+      "p5": 176.3,
+      "p95": 232.9,
+      "contrast": 56.6
+    },
+    "dominantColorShare": 0.284
+  },
+  "renderBudget": {
+    "drawCalls": 19,
+    "shadowCalls": 18,
+    "triangles": 300356
+  },
+  "frame": {
+    "medianMs": 0.4,
+    "worstMs": 1.8,
+    "size": [
+      1280,
+      720
+    ]
+  }
+}

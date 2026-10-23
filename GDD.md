@@ -33,7 +33,9 @@ Saturated but never neon: the final grade caps saturation and keeps whites warm.
   frozen.
 - **Final image path (one pass, in this order):** HDR scene → soft bloom (sun, fireflies, glowing flowers)
   → exposure → filmic tone map → Ghibli grade (a 3D LUT stored as a 2D strip, warm highlights, lifted
-  blue-green shadows) → gentle vignette. Grade keys per time of day, blended.
+  blue-green shadows) → gentle vignette. *(As built: one LUT for the whole day; the time of day comes from
+  the atmosphere's light, not from grade keys. Exposure is a key predicted from the light model and eased like
+  an eye adapting, not a GPU luminance meter: no readback stall on WebGL.)*
 - **Readability before beauty:** ripe crops sparkle and bob; seeds and lost things glint gold-white with a
   chime; pollinator sprites glow soft teal; storms are dark violet-grey and build for minutes before they
   arrive. Every key thing also has an icon or shape, so it survives the colour-blind modes.
@@ -42,7 +44,10 @@ Saturated but never neon: the final grade caps saturation and keeps whites warm.
   sea, (3) glide view toward the next island with haze, (4) grass close-up in wind, (5) waterfall off an
   edge into the clouds, (6) the High Rocks from below at golden hour. Each captured at noon, golden hour
   and in rain. The `threejs-aaa-graphics-builder` scorecard is run at stage 2 and at the end; the target is
-  premium (no category below 2, average ≥ 2.3).
+  premium (no category below 2, average ≥ 2.3). *(Stage 2: views 5 and 6 stand in as "the cliff edge into
+  the clouds" and "Hearth Isle from below" until the waterfall (Willow Pond) and the High Rocks exist in
+  stage 3, when those two baselines are re-locked. Rain captures come with the rain in stage 7.
+  `npm run views` compares; `npm run views:lock` re-locks.)*
 
 **Honest risk, and what I propose instead.** True raymarched volumetric clouds are too slow for the
 target laptop (Intel UHD class, WebGL, where TIDEFALL's terrain shadows alone were 85% of the frame). So:

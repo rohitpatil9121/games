@@ -1,3 +1,5 @@
 node_modules/
 scratch/
 *.log
+artifacts/views/*.png
+artifacts/views/views.json
