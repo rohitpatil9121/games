@@ -15,7 +15,7 @@ import { dsin, dcos, hash3, smooth, clamp, TAU } from "./det.js";
  *            easing to `riseTop` at the top, fading out over the last 0.3 m.
  *   vent     a falling column: `at` (x, y), `radius`, from `top` down to `bottom`, `speed` downward.
  *   gust     a box (`min`, `max`) the window blows into, along `dir` (unit, horizontal) at `speed`; one gust
- *            per `slot` seconds, starting at a seeded moment in the slot, lasting `length`.
+ *            per `slot` seconds, starting at a seeded moment in its first `jitter` s, lasting `length`.
  *
  * `sample()` writes into `out` (no allocation) and also reports how strong the strongest source is there, so
  * the HUD and the effects can tell "in the fan" from "in a thermal".
@@ -38,13 +38,14 @@ export function fanAxis(src, t, axis) {
 }
 
 /**
- * When the gust in a given slot starts (seconds), from the seed. Gusts are 12 to 28 s apart.
+ * When the gust in a given slot starts (seconds), from the seed: somewhere in the first `jitter` seconds of
+ * its slot, so gusts are `slot - jitter` to `slot + jitter` seconds apart.
  * @param {object} src a gust source
  * @param {number} seed
  * @param {number} slot index
  */
 export function gustStart(src, seed, slot) {
-    return slot * src.slot + hash3(seed, slot, 7919) * (src.slot - src.length - 2);
+    return slot * src.slot + hash3(seed, slot, 7919) * src.jitter;
 }
 
 /** 0..1: how strong a gust source blows at time t (eased in and out over half a second). */

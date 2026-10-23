@@ -10,9 +10,13 @@
 <body>
 <canvas id="view" tabindex="0" aria-label="The game view"></canvas>
 <div id="aim" aria-hidden="true"></div>
+<div id="ring" role="status"></div>
+<div id="tip" role="note" aria-live="polite" hidden></div>
+<div id="caption" aria-live="assertive"></div>
 <div id="flap" aria-label="Flap charge"><i></i></div>
-<pre id="debug"></pre>
-<p id="help">Click to fly with the mouse. Space or click: flap. W S A D also steer.</p>
+<div id="result" role="status" hidden></div>
+<pre id="debug" hidden></pre>
+<p id="help">Click to fly with the mouse. Space or click: flap. W S A D also steer. 1 2 3: fold. N: next set. F3: numbers.</p>
 <script type="module" src="game/main.js"></script>
 </body>
 </html>

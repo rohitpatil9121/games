@@ -286,3 +286,18 @@ function collide(p, f, r) {
     }
     return true;
 }
+
+/**
+ * The input that steers a plane toward a direction: bank toward the heading, pitch toward the angle. Used by
+ * mouse-aim and by bots, so both fly through exactly the same controls as keys do.
+ * @param {{ yaw: number, pitch: number }} p the plane
+ * @param {number} yaw @param {number} pitch the wanted direction
+ * @returns {{ pitch: number, roll: number }} −127..127
+ */
+export function steerToward(p, yaw, pitch) {
+    let ey = yaw - p.yaw;
+    while (ey > PI) ey -= TAU;
+    while (ey < -PI) ey += TAU;
+    const roll = clamp(-ey * 2.4, -1, 1), up = clamp((pitch - p.pitch) * 3.2, -1, 1);
+    return { pitch: Math.round(up * 127), roll: Math.round(roll * 127) };
+}

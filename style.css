@@ -1,11 +1,22 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: #e6dccd; font-family: system-ui, sans-serif; }
 #view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
-#debug { position: fixed; left: 12px; top: 10px; margin: 0; padding: 8px 10px; font: 12px/1.45 ui-monospace, Consolas, monospace;
+#debug { position: fixed; left: 12px; top: 52px; margin: 0; padding: 8px 10px; font: 12px/1.45 ui-monospace, Consolas, monospace;
     color: #2b2620; background: rgba(255, 252, 245, 0.78); border-radius: 6px; pointer-events: none; }
-#help { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); margin: 0; font-size: 13px; color: #3a332b;
-    background: rgba(255, 252, 245, 0.7); padding: 4px 10px; border-radius: 12px; pointer-events: none; }
-#aim { position: fixed; left: -14px; top: -14px; width: 24px; height: 24px; border: 2px solid rgba(40, 34, 28, 0.7);
+#help { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); margin: 0; font-size: 12px; color: #3a332b;
+    background: rgba(255, 252, 245, 0.7); padding: 3px 10px; border-radius: 12px; pointer-events: none; white-space: nowrap; }
+#aim { position: fixed; left: -12px; top: -12px; width: 20px; height: 20px; border: 2px solid rgba(40, 34, 28, 0.6);
     border-radius: 50%; pointer-events: none; }
-#flap { --charge: 1; position: fixed; left: 50%; bottom: 46px; width: 120px; height: 6px; transform: translateX(-50%);
-    background: rgba(40, 34, 28, 0.25); border-radius: 3px; overflow: hidden; }
-#flap i { display: block; height: 100%; width: calc(var(--charge) * 100%); background: #2b2620; }
+#flap { --charge: 1; position: fixed; left: 50%; bottom: 40px; width: 110px; height: 5px; transform: translateX(-50%);
+    background: rgba(40, 34, 28, 0.2); border-radius: 3px; overflow: hidden; }
+#flap i { display: block; height: 100%; width: calc(var(--charge) * 100%); background: rgba(40, 34, 28, 0.55); transition: background 0.15s; }
+#flap.ready i { background: #2b2620; }
+#ring { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); font-size: 15px; color: #2b2620;
+    background: rgba(255, 252, 245, 0.75); padding: 4px 12px; border-radius: 12px; pointer-events: none; font-variant-numeric: tabular-nums; }
+#tip { position: fixed; transform: translate(-50%, 0); font-size: 15px; color: #fffaf0; background: rgba(43, 38, 32, 0.72);
+    padding: 5px 12px; border-radius: 14px; pointer-events: none; white-space: nowrap; }
+#caption { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); font-size: 14px; color: #fffaf0;
+    background: rgba(43, 38, 32, 0.6); padding: 3px 10px; border-radius: 10px; pointer-events: none; }
+#caption:empty { display: none; }
+#result { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%); font-size: 18px; text-align: center; color: #2b2620;
+    background: rgba(255, 252, 245, 0.92); padding: 14px 22px; border-radius: 12px; line-height: 1.6; }
+.small { font-size: 13px; color: #5a5046; }

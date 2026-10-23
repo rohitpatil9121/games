@@ -8,7 +8,8 @@
  */
 import { createPlane, stepPlane, glideAngle } from "../game/sim.js";
 import { FOLDS, FOLD_IDS, FLIGHT, DT, BTN } from "../game/data.js";
-import { sample, makeAir } from "../game/air.js";
+import { sample, makeAir, gustStart, gustPower, gustIn } from "../game/air.js";
+import { crosses, RingRun } from "../game/rings.js";
 import { makeRandom } from "../game/det.js";
 import { bedroom } from "../game/rooms/bedroom.js";
 
@@ -60,7 +61,7 @@ for (const fold of FOLD_IDS) {
 
 // 4. The thermal: circling in it climbs; gliding beside it sinks
 {
-    const th = bedroom.air.find((s) => s.kind === "thermal");
+    const th = bedroom.air.filter((s) => s.kind === "thermal").sort((a, b) => b.radius - a.radius)[0];
     const room = { ...hall, air: [{ ...th, at: [0, 0], bottom: 0.5, top: 25 }] };
     for (const fold of FOLD_IDS) {
         // circle the column at a bank of about 85%: start on the circle, heading round it, correct the radius
@@ -130,6 +131,45 @@ for (const fold of FOLD_IDS) {
     const a = makeAir(), b = makeAir();
     sample(bedroom, 3, 12.5, 0.4, 0.2, 1.1, a); sample(bedroom, 3, 12.5, 0.4, 0.2, 1.1, b);
     check("air field pure", a.x === b.x && a.y === b.y && a.z === b.z, `glide angles ${FOLD_IDS.map((f) => ((glideAngle(f) * 180) / Math.PI).toFixed(1) + "°").join(" ")}`);
+}
+
+// 9. Window gusts: 12 to 28 s apart, 3 s long, seeded; the telegraph counts down to each; a plane in the
+//    gust's box is pushed along it
+{
+    const g = bedroom.air.find((s) => s.kind === "gust");
+    const starts = []; for (let k = 0; k < 40; k++) starts.push(gustStart(g, 77, k));
+    const gaps = starts.slice(1).map((s, i) => s - starts[i]);
+    const minGap = Math.min(...gaps), maxGap = Math.max(...gaps);
+    let telegraph = true;
+    for (let k = 1; k < 10; k++) { const s = starts[k]; if (Math.abs(gustIn(g, 77, s - 1.5) - 1.5) > 1e-9 || gustPower(g, 77, s + 1.5) < 0.99) telegraph = false; }
+    const room = { ...hall, air: [{ ...g, min: [-5, -5, 15], max: [5, 5, 25] }] };
+    const p = createPlane(0, "glider", { at: [0, 0, 20], yaw: 0 }), q = createPlane(1, "glider", { at: [0, 0, 20], yaw: 0 });
+    const s0 = starts[2];
+    p.clock = Math.round(s0 * 60) + 30; q.clock = Math.round((s0 - 6) * 60);
+    for (let i = 0; i < 60; i++) { stepPlane(p, IDLE, room, 77); stepPlane(q, IDLE, room, 77); }
+    const push = q.y - p.y;
+    check("window gusts", minGap >= 11.9 && maxGap <= 30 && telegraph && push > 0.8, `gaps ${f2(minGap)}–${f2(maxGap)} s; 1 s in a gust moves a glider ${f2(push)} m along it`);
+}
+
+// 10. A vent pushes down
+{
+    const room = { ...hall, air: [{ kind: "vent", at: [0, 0], radius: 0.5, top: 30, bottom: 0, speed: 0.6 }] };
+    const p = createPlane(0, "glider", { at: [0, 0, 20], yaw: 0 }), q = createPlane(1, "glider", { at: [0, 0, 20], yaw: 0 });
+    for (let i = 0; i < 30; i++) { stepPlane(p, { pitch: 0, roll: 127, buttons: 0 }, room, 1); stepPlane(q, { pitch: 0, roll: 127, buttons: 0 }, calm, 1); }
+    check("vent", q.z - p.z > 0.15, `0.5 s circling in it: ${f2(q.z - p.z)} m lower`);
+}
+
+// 11. Rings: through the middle counts, either way; past the rim, or not reaching it, doesn't
+{
+    const ring = { at: [0, 0, 1], yaw: 0, pitch: 0, r: 0.2 };
+    const ok = crosses(ring, -0.01, 0, 1, 0.01, 0.1, 1.05) && crosses(ring, 0.01, 0, 1, -0.01, 0, 1) && !crosses(ring, -0.01, 0.25, 1, 0.01, 0.25, 1) && !crosses(ring, -0.05, 0, 1, -0.01, 0, 1);
+    const set = { name: "t", rings: [ring, { ...ring, at: [1, 0, 1] }] };
+    const run = new RingRun(set);
+    const r1 = run.step(0.9, 0, 1, 1.1, 0, 1); // the second ring first: doesn't count
+    const r2 = run.step(-0.1, 0, 1, 0.1, 0, 1);
+    for (let i = 0; i < 59; i++) run.step(0.2, 0, 1, 0.2, 0, 1);
+    const r3 = run.step(0.9, 0, 1, 1.1, 0, 1);
+    check("rings", ok && r1 === null && r2 === "ring" && r3 === "done" && Math.abs(run.seconds - 1) < 1e-9, `in order, timed from the first ring: ${f2(run.seconds)} s`);
 }
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

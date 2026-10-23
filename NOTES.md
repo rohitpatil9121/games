@@ -89,3 +89,50 @@ Risks seen for later stages:
 - A plane sliding along the floor slows to a stop and needs a flap to leave. Fine for now; may need a
   "hop" when the flap is pressed on the floor.
 - Glancing hits at a wall's corner with speed between scrape and crumple can look like a sudden turn.
+
+## Stage 2: air field and flight feel (`input-systems`, `camera-systems`, `game-feel`, `disney-animation-rule-skill`)
+
+- Air: the window gust is in the bedroom (a box from the window across the room, 1.1 m/s for 3 s, one
+  per 20 s slot starting in its first 8 s, so 12–28 s apart, from the seed); the desk lamp is a second,
+  small thermal; vents are written and tested, placed in the classroom later. Curtains hang beside the
+  window and stir for the 1.5 s before a gust (the telegraph: their flutter speeds up and they lift),
+  then billow while it blows; a caption says the same thing.
+- `game/rings.js`: Ring Run, pure. A pass is the tick's segment crossing the ring's disc inside its
+  radius (the centre must clear the rim by half the plane's radius). In order; timed from the first ring.
+  Bedroom sets: "First flight" (the tutorial: a high ring on the thermal's edge, a ring in the fan's
+  stream, a high ring to zoom up to with the stall prompt), "Bunk run", "Shelf weave". The page opens
+  straight into set 1. The next ring is bright, the one after dim, the rest faint; a pass bursts.
+- `game/controls.js` (`input-systems`, adapted from TIDEFALL's): actions, not keys (nose up/down, bank
+  left/right, flap, restart); keyboard, mouse, gamepad; radial stick deadzone; rebinding with
+  `capture()`; mouse-aim or direct steering, switching on whichever was used last; invert pitch.
+  `steerToward()` is in `sim.js` so bots will steer through the same input as mouse-aim. Flap is
+  buffered 8 ticks in the simulation.
+- `game/planeview.js` (`game-feel`, `disney-animation-rule-skill`): the plane is five points rebuilt each
+  frame. Dihedral with speed; the flap is impact first (no time for anticipation: the boost is applied
+  on the press), tips snap down in 70 ms, overshoot up at 180 ms, settle by 350 ms; tips shiver in a
+  stall or rough air (secondary, after the sim's own wobble), scaled by the fold; crumple squashes into
+  a lumpy paper ball in 120 ms that tumbles as it falls; refold unfolds with an ease-out-back overshoot
+  in 300 ms, then blinks while it can't be tagged (a steady glow with reduce motion). Puffs off the wings
+  on a flap, paper bits on a crumple, a few flecks on a hard glance. Shake and hit-stop scaled by
+  importance: crumple 0.3 + 80 ms, glance 0.06, ring 0.05, flap 0.02; all off with reduce motion.
+- Camera (`camera-systems`): unchanged from stage 1 apart from comfort settings read live (lean, FOV
+  kick, horizon lock).
+
+Measured:
+- `node tools/test.mjs`: 19 pass (new: gusts 13.9–25.5 s apart on 40 seeded slots, the telegraph
+  counts down exactly, 1 s in a gust moves a glider 1.58 m; a vent drops a circling glider 0.38 m in
+  0.5 s; rings count in order, either way through, not past the rim, timed from the first).
+- In the browser, a crude mouse-aim autopilot (climb in the thermal when too low for the next ring, else
+  aim at it) finished "First flight" with every fold: glider 10.1 s (3 crumples), stunt 9.0 s (5),
+  dart 9.6 s (7, flapping while it climbs). So the tutorial can be done by each fold; the crumples are
+  the autopilot's, which aims straight at rings through furniture.
+- Screens checked: the ring and its tip, the flap puffs and wing flex, a crumple (the paper ball and
+  bits), the curtains; no console errors.
+
+Not done or not checked:
+- "Bunk run" and "Shelf weave" have not been flown to the end by anything: the crude autopilot can't
+  thread the bunk cave. `tools/check-rooms.mjs` (stage 6, with the rooms built properly) will check every
+  ring is reachable in order.
+- Ring Run best times are kept only for the page's life; saving comes with the settings (stage 7).
+- Touch and tilt are stage 8. The gamepad path is written but untested (no pad here).
+- Feel is still for a human to judge: the flap snap, the lean, the gust's strength.
