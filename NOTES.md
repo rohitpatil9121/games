@@ -188,3 +188,66 @@ Alpha's plane with its name and trail where the server has it. A static server (
 Not verified in the browser: smooth real-time motion with two tabs. The Browser pane is throttled to about
 7 fps here, so frame-driven checks can't run in real time; the netcode numbers above come from the
 virtual-clock harness and the real-socket test instead.
+
+## Stage 4: tag (Classic Tag, Ink Spread, erasers)
+
+Rules (all in `sim.js`, decided by the server; `tools/test.mjs` has 22 tests now):
+- Classic Tag: after 3 s of grace a seeded pick makes one plane "it". "It" tags a clean plane by getting
+  within 15 cm (centre to centre); "it" passes on and the new "it" can't tag the old one back for 3 s.
+  Nobody can be tagged while crumpled or in the 1.5 s after a refold; a crumpled "it" stays "it" (GDD
+  §2b). "It" recharges its flap 25% faster (§2b). A tag knocks the tagged plane up and wobbles both. 4:00
+  rounds; least time as "it" wins, ties share it. If "it" leaves, a new one is picked.
+- Ink Spread: one hunter; every tagged plane becomes a hunter; the last clean plane wins, or every clean
+  plane when the 3:00 clock runs out. A late arrival joins the hunters.
+- Erasers (my addition, approved): three out at a time on five risky spots per room (the fan's edge, the
+  gust's path, under the bunk, between shelf boards, over the lamp); 9 cm to pick up; back 20 s later at a
+  free spot chosen from the seed. Classic: 4 s off your time as "it". Ink Spread: blocks one tag.
+- Results stay up 12 s, then a new round (TIDEFALL's intermission).
+
+Lag compensation (BREACH's rewind, TIDEFALL's `positionAt`): each "it" checks its targets, input by input,
+where it saw them: the input's view tick turned into ticks ago. Tags aren't predicted by the client (its
+prediction has no other planes); they arrive as events and the "it" flag comes back in your own plane's
+snapshot (it feeds the flap recharge, so prediction stays exact).
+
+**A change to the brief, and why.** The brief said the rewind is capped at 200 ms, as in BREACH. Measured
+with `npm run test:net` (a dart chasing a weaving glider by what it sees, 4 minutes per link; a "contact"
+is a moment the chaser's screen shows the two within reach):
+
+| Link | Cap 12 ticks (200 ms in all) | Cap 20 ticks (200 ms of ping on top of interpolation) | No rewind |
+|---|---|---|---|
+| 0 ms | 33 of 36 | 33 of 36 | 33 of 55 (60%) |
+| 50 ms ±10 | 79 of 80 | 79 of 80 | 17 of 34 (50%) |
+| 100 ms ±20 | 38 of 45 (84%) | 55 of 55 | 10 of 36 (28%) |
+| 150 ms ±20 | 36 of 53 (68%) | 50 of 58 (86%) | 6 of 38 (16%) |
+| 150 ms ±30, 2% loss | 28 of 46 (61%) | 62 of 70 (89%) | 5 of 27 (19%) |
+
+At 150 ms of ping what the chaser sees is about 15 ticks old (5 to 8 of interpolation, then the snapshot's
+trip and the input's trip). BREACH's 200 ms cap was for shots and TIDEFALL's for 2 m shoves; with a 15 cm
+reach the last 3–4 ticks matter. So the cap is now 20 ticks (`MAX_REWIND` in data.js, GDD §2 updated).
+The cost: a runner on a fast link can be tagged up to a third of a second "behind" where their own screen
+had them, which in a room this size is under 30 cm. Tags nobody saw coming: 0 to 2 per 4 minutes.
+Without the sound and the HUD's arrow this is all numbers; a human should judge whether tags feel fair.
+
+Presentation:
+- "It" and hunters are inked: near-black indigo paper, a dark trail, and ink dripping as they fly (a
+  dotted line that hangs a moment). Their name label gets a ● too, so it doesn't rest on colour alone.
+  An eraser's shield glows.
+- The tag moment: an ink splat thrown off the tagged plane, a rubber-stamp "YOU'RE IT" / "TAGGED!" /
+  "INKED" that slams in (overshoot ease; still with reduce motion), 60 ms hit-stop and a shake for the two
+  involved, a line in the feed.
+- HUD: the mode, the clock, who is "it" (or hunters vs clean), the waiting and grace countdowns; scores
+  per plane (time as "it", or tags); an arrow to the nearest target when you're "it" (red) or to the
+  nearest "it" when you're clean (ink), over the plane when it's on screen and on the screen's edge when
+  it isn't, with the distance.
+- Erasers: small pink erasers with a blue sleeve, bobbing and turning; a sparkle when taken.
+- Results: winners starred, time as "it" or clean/inked, tags, erasers, the next round's countdown.
+
+Checked in the browser (Practice, 4 planes, the bots still without brains): the first "it" is picked
+after 3 s; chasing a bot with mouse-aim tagged it at 12 s ("You tagged Dart" in the feed, Dart marked
+"it" in the HUD and the list, the arrow pointing at Dart 3.1 m away); a shortened clock ended the round
+and showed "Crane and Fold win" (both 0.0 s as it) with the table and "Next round in 12 s"; Ink Spread
+with two hunters drew both inked with drip trails and ● labels and the arrow on the nearest. No console
+or server errors. Traffic with tag fields: 4.3 kB/s down for one client in a room of 8.
+
+Not done yet: bots that play (stage 5: until then Practice "it" chases planes that fly hands-off and
+crash); sounds for the stamp, the eraser and "it is near" (stage 7); colour-blind ink colours (stage 8).

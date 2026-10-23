@@ -92,6 +92,31 @@ export const MATCH = Object.freeze({
     intermission: 12,
 });
 
-/** Lag compensation (stage 4, tags): positions remembered for HISTORY ticks, a tag reaches back at most MAX_REWIND (200 ms). */
+/**
+ * Tag (GDD §2 and §2b). `reach` is how close (centre to centre) "it" must get; "it" recharges its flap faster
+ * (`itFlap` of the time). The first "it" is picked after `grace` seconds of flying; nobody can tag back the
+ * plane that just tagged them for `noTagBack` seconds. Classic rounds are `classic` seconds, Ink Spread
+ * `spread`. Erasers: `slots` out at once on the room's eraser spots, picked up within `radius`, back
+ * `respawn` seconds after; one takes `minus` seconds off your time as "it" (Classic) or blocks one tag
+ * (Ink Spread).
+ */
+export const TAG = Object.freeze({
+    reach: 0.15,
+    itFlap: 0.75,
+    grace: 3,
+    noTagBack: 3,
+    classic: 240,
+    spread: 180,
+    /** a tag knocks the two planes apart a little */
+    knock: 0.35,
+    eraser: Object.freeze({ slots: 3, radius: 0.09, respawn: 20, minus: 4 }),
+});
+
+/**
+ * Lag compensation for tags: positions remembered for HISTORY ticks, a tag reaches back at most MAX_REWIND.
+ * 20 ticks is 200 ms of ping on top of the interpolation delay (5 to 8 ticks). The brief said 200 ms in
+ * all, as BREACH; with a 15 cm reach that let only 68% of the tags a 150 ms player saw count (NOTES.md,
+ * stage 4), against 86% with this.
+ */
 export const HISTORY = 32;
-export const MAX_REWIND = 12;
+export const MAX_REWIND = 20;

@@ -6,8 +6,8 @@
  * Each test prints a line; the process exits non-zero if any fails. The numbers they print are the
  * stage-1 measurements in NOTES.md.
  */
-import { createPlane, stepPlane, glideAngle } from "../game/sim.js";
-import { FOLDS, FOLD_IDS, FLIGHT, DT, BTN } from "../game/data.js";
+import { createPlane, stepPlane, glideAngle, createState, addPlayer, step } from "../game/sim.js";
+import { FOLDS, FOLD_IDS, FLIGHT, DT, BTN, TAG, TICK_RATE } from "../game/data.js";
 import { sample, makeAir, gustStart, gustPower, gustIn } from "../game/air.js";
 import { crosses, RingRun } from "../game/rings.js";
 import { makeRandom } from "../game/det.js";
@@ -170,6 +170,64 @@ for (const fold of FOLD_IDS) {
     for (let i = 0; i < 59; i++) run.step(0.2, 0, 1, 0.2, 0, 1);
     const r3 = run.step(0.9, 0, 1, 1.1, 0, 1);
     check("rings", ok && r1 === null && r2 === "ring" && r3 === "done" && Math.abs(run.seconds - 1) < 1e-9, `in order, timed from the first ring: ${f2(run.seconds)} s`);
+}
+
+// 12. Tag rules: a fresh round, then planes placed by hand
+{
+    const fresh = (mode, n) => {
+        const st = createState(bedroom, 9, { mode });
+        for (let i = 1; i <= n; i++) addPlayer(st, i, "P" + i, { fold: "glider" });
+        return st;
+    };
+    /** park every plane still (they keep falling slowly, but no faster than a test needs) */
+    const put = (p, x, y, z) => { Object.assign(p, { x, y, z, crumpled: 0, guard: 0, speed: 0.4, pitch: 0, yaw: 0, roll: 0 }); for (let i = 0; i < p.hist.length; i += 3) { p.hist[i] = x; p.hist[i + 1] = y; p.hist[i + 2] = z; } };
+    const tick = (st) => { step(st, new Map(st.players.map((p) => [p.id, { seq: p.seq + 1, pitch: 0, roll: 0, buttons: 0, lag: 0 }]))); return st.events; };
+
+    const st = fresh("tag", 3);
+    for (let i = 0; i < TAG.grace * TICK_RATE + 1; i++) tick(st);
+    const first = st.players.filter((p) => p.it);
+    const [a, b, c] = st.players;
+    for (const p of st.players) p.it = false;
+    a.it = true;
+    put(a, 0, 0, 1.5); put(b, 0.1, 0, 1.5); put(c, 2, 0, 1.5);
+    const ev1 = tick(st).filter((e) => e.type === "tag");
+    const passed = ev1.length === 1 && b.it && !a.it && b.noBackId === a.id;
+    // b can't tag a back straight away, but can tag c
+    put(a, 0.08, 0, 1.5); put(b, 0, 0, 1.5);
+    const back = tick(st).some((e) => e.type === "tag");
+    b.noBack = 0; put(b, 0, 0, 1.5); put(a, 2, 1, 1.5); put(c, 0.1, 0, 1.5); c.guard = 30;
+    const guarded = tick(st).some((e) => e.type === "tag");
+    c.guard = 0; c.crumpled = 10;
+    const crumpled = tick(st).some((e) => e.type === "tag");
+    c.crumpled = 0; put(c, 0.1, 0, 1.5);
+    const after = tick(st).some((e) => e.type === "tag") && c.it;
+    check("tag passes it on; no tag-back; not while guarded or crumpled", first.length === 1 && passed && !back && !guarded && !crumpled && after,
+        `first "it" picked after ${TAG.grace} s; reach ${TAG.reach} m; no tag-back ${TAG.noTagBack} s`);
+
+    // erasers: Classic takes time off; Ink Spread blocks one tag
+    const e = st.erasers[0], spot = bedroom.erasers[e.spot];
+    c.itTicks = 600; put(c, spot[0], spot[1], spot[2]);
+    tick(st);
+    const took = c.itTicks <= 600 - TAG.eraser.minus * TICK_RATE + 2 && c.erasers === 1 && e.at > st.tick;
+    const sp = fresh("spread", 3);
+    for (let i = 0; i < TAG.grace * TICK_RATE + 1; i++) tick(sp);
+    const [h, r1, r2] = sp.players;
+    for (const p of sp.players) { p.it = false; p.ink = false; }
+    h.it = true; h.ink = true;
+    r1.shield = 1; put(h, 0, 0, 1.5); put(r1, 0.1, 0, 1.5); put(r2, 2, 0, 1.5);
+    const shielded = tick(sp).some((x) => x.type === "shield") && !r1.it && r1.shield === 0;
+    r1.guard = 0; put(r1, 0.1, 0, 1.5);
+    const ended = tick(sp).some((x) => x.type === "over");
+    // two hunters, one clean plane left: that one wins
+    const over = r1.it && h.it && ended && sp.phase === "over" && sp.winners.length === 1 && sp.winners[0] === r2.id;
+    check("erasers; Ink Spread spreads, shields, and ends with the last clean plane", took && shielded && over,
+        `an eraser takes ${TAG.eraser.minus} s off; the round ends when one clean plane is left, and it wins`);
+
+    // Classic ends on the clock, least time as "it" wins
+    const cl = fresh("tag", 2);
+    cl.clock = 5;
+    for (let i = 0; i < TAG.grace * TICK_RATE + 10; i++) tick(cl);
+    check("Classic ends on the clock, least time as \"it\" wins", cl.phase === "over" && cl.winners.length === 1 && cl.players.find((p) => p.id === cl.winners[0]).itTicks === Math.min(...cl.players.map((p) => p.itTicks)));
 }
 
 if (failed) { console.log(`\n${failed} failed`); process.exit(1); }

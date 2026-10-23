@@ -1,6 +1,6 @@
 /**
  * Netcode under bad networks. Run with `npm run test:net`. Copied from TIDEFALL's net-test.mjs (itself
- * BREACH's) and adapted to planes. Tags under lag come in stage 4.
+ * BREACH's) and adapted to planes.
  *
  * Part 1 runs on a virtual clock, so it is exact and repeatable: a real Room, real Clients, and the
  * game's own Conditions wrapper adding latency, jitter and loss between them, all stepped tick by tick:
@@ -8,6 +8,8 @@
  *   PREDICTION      how far the client's idea of its own plane is from the server's, at every snapshot,
  *                   while flying through the fan, the thermal and the gusts, flapping, and crashing
  *   INTERPOLATION   how smoothly another plane moves on the client's screen
+ *   TAGS            "it" chases a weaving plane by what it sees; every time its screen shows them touching,
+ *                   does the server count a tag? With lag compensation it should; without, often not
  *   TRAFFIC         bytes per second for one client in a full room
  *
  * Part 2 starts the real server and connects to it over real WebSockets (Node's own WebSocket).
@@ -17,10 +19,10 @@
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { BTN, TICK_RATE } from "../game/data.js";
-import { findPlayer } from "../game/sim.js";
+import { BTN, TICK_RATE, TAG, MAX_REWIND, HISTORY } from "../game/data.js";
+import { findPlayer, steerToward } from "../game/sim.js";
 import { Client, Loopback, Conditions, SocketTransport } from "../game/net.js";
-import { PROTOCOL, WIRE } from "../game/protocol.js";
+import { PROTOCOL, WIRE, INTERP_TICKS, SNAP_EVERY } from "../game/protocol.js";
 import { Room } from "../server/room.mjs";
 
 let failed = 0;
@@ -39,12 +41,12 @@ function harness(roomOptions, links) {
         client.controls = { pitch: 0, roll: 0, buttons: 0 };
         return client;
     });
-    const step = (each) => {
+    const step = (each, after) => {
         now += MS;
-        for (const c of clients) { c.frame(1 / TICK_RATE); if (each) each(c); c.tick(c.controls); }
+        for (const c of clients) { c.frame(1 / TICK_RATE); if (each) each(c); c.tick(c.controls); if (after) after(c); }
         room.tick();
     };
-    const run = (ticks, each) => { for (let i = 0; i < ticks; i++) step(each); };
+    const run = (ticks, each, after) => { for (let i = 0; i < ticks; i++) step(each, after); };
     return { room, clients, step, run, player: (c) => findPlayer(room.state, c.id) };
 }
 
@@ -90,6 +92,72 @@ for (const net of [{ latency: 0 }, { latency: 150, jitter: 30 }, { latency: 150,
     });
     const fly = h.player(flyer), want = fly.speed / TICK_RATE, freezes = steps.filter((d) => d < want * 0.2).length, jumps = steps.filter((d) => d > want * 4).length;
     check(`${label(net)}: no jumps, few freezes`, crumpled === 0 && jumps === 0 && freezes <= (net.loss ? 40 : 2), `${steps.length} frames: ${freezes} frozen, ${jumps} jumped; steps ${Math.min(...steps).toFixed(4)} to ${Math.max(...steps).toFixed(4)} m (about ${want.toFixed(4)})`);
+}
+
+// ------------------------------------------------------------------ tags
+
+/**
+ * "It" (client a, on the link being tested) chases b, who weaves in the open middle of the room. a steers at
+ * where its screen shows b. A "contact" is a moment a's screen shows the two within reach (the start of a
+ * run of such frames); it counts as registered if the server tags b within half a second. After each tag
+ * the server puts things back: a is "it" again and b is moved to a fresh spot, so the chase repeats.
+ */
+function tagTest(net, rewind) {
+    const h = harness({ mode: "tag", rewind }, [net, { latency: 40, jitter: 8 }]), [a, b] = h.clients;
+    h.run(TAG.grace * TICK_RATE + 30);
+    const pa = h.player(a), pb = h.player(b);
+    const reset = () => {
+        pa.it = true; pb.it = false; pa.noBack = 0; pb.noBack = 0;
+        // b starts 0.8 m ahead of a, both mid-room, heading the same way
+        const spots = [[-1.0, -0.6, 1.6, 0], [1.0, 0.6, 1.7, Math.PI], [0, -1.0, 1.8, Math.PI / 2], [-0.6, 0.8, 1.6, -Math.PI / 2]];
+        const s = spots[(resets++) % spots.length];
+        for (const [p, k, v] of [[pa, 0, 1.4], [pb, 0.6, 0.8]]) {
+            Object.assign(p, { x: s[0] + Math.cos(s[3]) * k, y: s[1] + Math.sin(s[3]) * k, z: s[2], yaw: s[3], pitch: -0.1, roll: 0, speed: v, crumpled: 0, guard: 0 });
+            for (let i = 0; i < HISTORY; i++) { p.hist[i * 3] = p.x; p.hist[i * 3 + 1] = p.y; p.hist[i * 3 + 2] = p.z; }
+        }
+    };
+    let resets = 0, contacts = 0, registered = 0, tags = 0, phantoms = 0, touching = false, t = 0;
+    const pendingContacts = [];
+    reset();
+    h.run(30);
+    a.on("event", (e) => {
+        if (e.type !== "tag" || e.id !== a.id) return;
+        tags++;
+        // the oldest contact still waiting is the one this tag answers; a tag nobody saw coming is a phantom
+        if (pendingContacts.length) { pendingContacts.shift(); registered++; } else phantoms++;
+        reset();
+    });
+    const s = {};
+    h.run(60 * 240, (c) => {
+        t++;
+        if (c === b) {
+            // weave: bank one way, then the other, gently, with a flap now and then
+            c.controls.roll = Math.round(Math.sin(t * 0.012) * 45); c.controls.pitch = 10; c.controls.buttons = t % 160 < 2 ? BTN.flap : 0;
+            return;
+        }
+        // drop contacts that waited too long for a tag
+        while (pendingContacts.length && t - pendingContacts[0] > 60) pendingContacts.shift();
+        if (pb.crumpled || pa.crumpled) { if (t % 120 === 0) reset(); return; }
+        if (!c.sample(b.id, s)) return;
+        const me = c.me, dx = s.x - me.x, dy = s.y - me.y, dz = s.z - me.z, d = Math.hypot(dx, dy, dz);
+        const steer = steerToward(me, Math.atan2(dy, dx), Math.atan2(dz, Math.hypot(dx, dy)));
+        c.controls.pitch = steer.pitch; c.controls.roll = steer.roll; c.controls.buttons = d > 0.6 && me.flapWait === 0 ? BTN.flap : 0;
+    }, (c) => {
+        // what a's screen shows once this tick's input has moved it: its own plane, and b where it draws b
+        if (c !== a || pb.crumpled || pa.crumpled || !c.sample(b.id, s)) { if (c === a) touching = false; return; }
+        const me = c.me, d = Math.hypot(s.x - me.x, s.y - me.y, s.z - me.z);
+        const now = d < TAG.reach && me.it;
+        if (now && !touching) { contacts++; pendingContacts.push(t); }
+        touching = now;
+    });
+    return { contacts, registered, tags, phantoms };
+}
+console.log(`tags: "it" chases what it sees (rewind cap ${MAX_REWIND} ticks = ${Math.round(MAX_REWIND * MS)} ms, of which ${INTERP_TICKS} + up to ${SNAP_EVERY} are interpolation)`);
+for (const net of [{ latency: 0 }, { latency: 50, jitter: 10 }, { latency: 100, jitter: 20 }, { latency: 150, jitter: 20 }, { latency: 150, jitter: 30, loss: 0.02 }]) {
+    const on = tagTest(net, true), off = tagTest(net, false);
+    const rate = on.registered / Math.max(1, on.contacts), offRate = off.registered / Math.max(1, off.contacts);
+    check(`${label(net)}: a tag that looks like a tag counts`, on.contacts >= 15 && rate >= (net.loss ? 0.8 : net.latency >= 150 ? 0.85 : 0.9),
+        `${on.registered} of ${on.contacts} seen contacts tagged with lag compensation (${on.phantoms} tags nobody saw); without: ${off.registered} of ${off.contacts} (${Math.round(offRate * 100)}%, ${off.phantoms} unseen)`);
 }
 
 // ------------------------------------------------------------------ traffic

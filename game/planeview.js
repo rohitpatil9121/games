@@ -66,6 +66,8 @@ export function planeRotation(out, yaw, pitch, roll) {
 
 const easeOutBack = (t) => { const c = 1.9; return 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; };
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+/** the ink: near-black indigo, the strongest contrast in the room (GDD §7); a colour-blind scheme may change it */
+export const INK = [0.13, 0.11, 0.24];
 
 export class PlaneView {
     /**
@@ -78,13 +80,18 @@ export class PlaneView {
         this.fx = opts.effects;
         this.geometry = makeGeometry();
         writeGeometry(this.geometry, 0.006, 0.006);
-        this.material = new StandardMaterial({ color: opts.color || [0.97, 0.96, 0.92], cull: "none", rim: [0.25, 0.25, 0.25] });
+        this.paper = Float32Array.from(opts.color || [0.97, 0.96, 0.92]);
+        this.material = new StandardMaterial({ color: this.paper, cull: "none", rim: [0.25, 0.25, 0.25] });
         this.root = scene.add(new Entity({ name: "plane" }));
         this.root.interpolate = !opts.remote;
         this.body = new Entity({ mesh: new Mesh(this.geometry, this.material) });
         this.ball = new Entity({ mesh: new Mesh(ballGeometry(), this.material), visible: false });
         this.root.add(this.body); this.root.add(this.ball);
         this.trail = scene.add(new Trail({ length: 45, color: [0.32, 0.3, 0.27] }));
+        this.trail.mesh.material.blending = "normal";
+        /** inked ("it", or a hunter in Ink Spread): set by setInk */
+        this.inked = false;
+        this.ink = Float32Array.from(INK);
         /** real-time clock and when each event last happened */
         this.time = 0;
         this.flapAt = -9; this.crumpleAt = -9; this.refoldAt = -9;
@@ -127,7 +134,26 @@ export class PlaneView {
             }
         }
         if (p.crumpled === 0) this.trail.push(p.x - back[0] * 0.8, p.y - back[1] * 0.8, p.z);
+        // ink drips off an inked plane, a dotted line that hangs in the air for a moment
+        this.dripT = (this.dripT || 0) + 1;
+        if (this.inked && p.crumpled === 0 && this.dripT % 3 === 0) {
+            const i = this.ink;
+            this.fx.emit(1, { position: [p.x + back[0], p.y + back[1], p.z - 0.008], velocity: [0, 0, -0.05], spread: 0.006, life: [0.9, 1.3], size: [0.022, 0.008], color: [i[0], i[1], i[2], 0.95], colorEnd: [i[0], i[1], i[2], 0] });
+        }
         this.state = p; this.foldInfo = fold;
+    }
+
+    /**
+     * Ink the plane ("it", or a hunter) or wash it. Inked planes are near-black with a dark trail and drip ink
+     * as they fly, so "it" reads from anywhere in the room, by shape and darkness as well as colour.
+     * @param {boolean} on @param {number[]} [ink] the ink colour (colour-blind schemes)
+     */
+    setInk(on, ink) {
+        if (ink) this.ink.set(ink);
+        if (on === this.inked && !ink) return;
+        this.inked = on;
+        this.material.color.set(on ? this.ink : this.paper);
+        this.trail.color.set(on ? this.ink : [0.32, 0.3, 0.27]);
     }
 
     /** Take the plane out of the scene. */
@@ -165,6 +191,8 @@ export class PlaneView {
         const guarded = p.guard > 0 && p.crumpled === 0;
         if (guarded && !opts.reducedMotion) this.body.visible = ((t * 10) | 0) % 3 !== 0;
         this.material.emissive.fill(guarded && opts.reducedMotion ? 0.3 : 0);
+        // a shield (Ink Spread eraser) glows softly
+        if (p.shield) { this.material.emissive[0] = 0.25; this.material.emissive[1] = 0.32; this.material.emissive[2] = 0.45; }
 
         // flex: dihedral with speed, the flap's snap, flutter in a stall or rough air
         const speed01 = clamp01((p.speed - f.stall) / (f.max - f.stall));

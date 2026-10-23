@@ -59,7 +59,9 @@ Units: metres, seconds, Z up (Projection Lab's convention). The simulation runs 
 - **Ring Run:** fly through paper rings in order against the clock, alone or with others (not a race
   between players, just best times). The first run is the tutorial (§9).
 - **Lag compensation:** BREACH's rewind. The server tests a tag against where the target was on the
-  tagger's screen (its view tick), capped at 12 ticks (200 ms).
+  tagger's screen (its view tick), capped at 20 ticks: 200 ms of ping on top of the interpolation delay.
+  (Changed in stage 4 from 200 ms in all: with a 15 cm reach that counted only 68% of the tags a 150 ms
+  player saw; 20 ticks counts 86%.)
 - **Goals:** this minute: catch the nearest plane, or shake the hunter off. This round: be "it" the
   least, or be the last clean plane. Over many rounds: master both rooms with each fold, beat your Ring
   Run times, unlock patterns.

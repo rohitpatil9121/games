@@ -19,7 +19,8 @@
       <label class="field">Fold <select id="fold"></select></label>
     </div>
     <fieldset class="row">
-      <legend>Ring Run in the bedroom</legend>
+      <legend>In the bedroom</legend>
+      <label>Mode <select id="p-mode"><option value="tag">Classic Tag</option><option value="spread">Ink Spread</option><option value="rings" selected>Ring Run</option></select></label>
       <label>Set <select id="p-set"></select></label>
       <label>Planes <select id="p-bots"></select></label>
     </fieldset>
@@ -53,6 +54,14 @@
 <div id="hud" hidden>
   <div id="labels" aria-hidden="true"></div>
   <div id="aim" aria-hidden="true"></div>
+  <div id="arrow" aria-hidden="true" hidden><b></b><span></span></div>
+  <div id="stamp" aria-live="assertive" hidden></div>
+  <ol id="feed" aria-live="polite"></ol>
+  <section id="results" hidden aria-labelledby="results-title">
+    <h2 id="results-title"></h2>
+    <table><tbody id="results-body"></tbody></table>
+    <p id="results-next" class="small"></p>
+  </section>
   <div id="ring" role="status"></div>
   <ol id="players" aria-label="Planes in the room"></ol>
   <div id="tip" role="note" aria-live="polite" hidden></div>

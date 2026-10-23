@@ -181,7 +181,10 @@ export class Room {
     sendSnapshots() {
         const s = this.state;
         const rows = s.players.map(planeRow);
-        const scores = s.players.map((p) => [p.id, p.run ? p.run.next : 0, p.run ? p.run.ticks : 0, p.best, this.clients.get(p.id)?.ping || 0]);
+        const ping = (p) => this.clients.get(p.id)?.ping || 0;
+        const scores = s.players.map((p) => (p.run ? [p.id, p.run.next, p.run.ticks, p.best, ping(p)]
+            : [p.id, Math.min(255, p.tags), s.mode === "tag" ? p.itTicks : p.clean, p.erasers, ping(p)]));
+        const erasers = s.erasers.map((e) => [e.spot, s.tick >= e.at ? 1 : 0]);
         for (const c of this.clients.values()) {
             const p = findPlayer(s, c.id);
             if (!p) continue;
@@ -197,7 +200,8 @@ export class Room {
                 if (was && sameRow(was, row)) continue;
                 c.sentScores.set(row[0], row); changedScores.push(row);
             }
-            this.sendTo(c, { t: "snap", tick: s.tick, ack: p.seq, ph: s.phase, ot: s.overTicks, you: p, p: changed, sc: changedScores, ev: this.events });
+            this.sendTo(c, { t: "snap", tick: s.tick, ack: p.seq, ph: s.phase, ot: s.overTicks, clock: s.clock, grace: s.grace, win: s.winners, er: erasers,
+                you: p, p: changed, sc: changedScores, ev: this.events });
         }
         this.events.length = 0;
     }

@@ -79,6 +79,17 @@ export const bedroom = Object.freeze({
             Object.freeze({ at: [-1.9, -0.9, 0.12], yaw: Math.PI / 2, pitch: 0, r: 0.1 }),
         ]) }),
     ]),
+    /**
+     * Eraser spots (tag modes): all in risky air. The edge of the fan's stream, the gust's path under the
+     * window, under the lower bunk, between two shelf boards, over the lamp's warm air.
+     */
+    erasers: Object.freeze([
+        Object.freeze([1.2, 0.55, 1.15]),
+        Object.freeze([0.35, 1.55, 1.35]),
+        Object.freeze([-2.0, -1.0, 0.14]),
+        Object.freeze([0.0, -1.7, 1.0]),
+        Object.freeze([2.1, 0.5, 1.55]),
+    ]),
     /** where planes launch and refold: position and the heading they face */
     launches: Object.freeze([
         Object.freeze({ at: [-0.9, 1.2, 1.9], yaw: -0.6 }),

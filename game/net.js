@@ -105,7 +105,8 @@ export class Client {
         this.snaps = [];
         this.renderTick = 0;
         this.serverTick = 0;
-        this.match = { phase: "play", overTicks: 0 };
+        /** the round: phase, ticks of results left, ticks of the tag clock left, grace, winners, erasers out */
+        this.match = { phase: "play", overTicks: 0, clock: 0, grace: 0, winners: [], erasers: [] };
         this.ping = 0;
         this.stats = { bytesIn: 0, bytesOut: 0, snaps: 0, corrections: 0, lastError: 0, replayed: 0 };
         this._count = { bytesIn: 0, bytesOut: 0, snaps: 0, since: 0 };
@@ -187,7 +188,7 @@ export class Client {
         this.snaps.length = 0;
         this.renderTick = tick - INTERP_TICKS;
         this.serverTick = tick;
-        this.match.phase = "play";
+        this.match.phase = "play"; this.match.winners = []; this.match.erasers = [];
         this.offset.x = this.offset.y = this.offset.z = 0;
     }
 
@@ -195,7 +196,7 @@ export class Client {
         this._count.snaps++;
         this.serverTick = m.tick;
         const mt = this.match;
-        mt.phase = m.ph; mt.overTicks = m.ot;
+        mt.phase = m.ph; mt.overTicks = m.ot; mt.clock = m.clock; mt.grace = m.grace; mt.winners = m.win; mt.erasers = m.er;
 
         const last = this.snaps[this.snaps.length - 1], players = new Map();
         if (last) for (const [id, row] of last.players) if (this.players.has(id)) players.set(id, row);
@@ -206,7 +207,8 @@ export class Client {
         }
         for (const row of m.sc) {
             const info = this.players.get(row[0]);
-            if (info) { info.next = row[1]; info.ticks = row[2]; info.best = row[3]; info.ping = row[4]; }
+            // Ring Run: next ring, ticks, best; tag: tags made, ticks as "it" (or clean), erasers
+            if (info) { info.next = info.tags = row[1]; info.ticks = row[2]; info.best = info.erasers = row[3]; info.ping = row[4]; }
             if (row[0] === this.id) this.ping = row[4];
         }
         this.snaps.push({ tick: m.tick, players });

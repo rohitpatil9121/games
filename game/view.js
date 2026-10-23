@@ -167,6 +167,48 @@ export class GreyboxView {
         }
     }
 
+    /**
+     * Erasers (tag modes): a small pink eraser on each spot that has one out, bobbing and turning so it
+     * catches the eye; a sparkle when one is picked up.
+     * @param {Array<[number, number]>} out [spot, present] per slot, from the snapshot
+     * @param {number} t real seconds
+     */
+    setErasers(out, t) {
+        const spots = this.room.erasers || [];
+        if (!this.eraserViews) {
+            const mat = new StandardMaterial({ color: [0.95, 0.5, 0.58], emissive: [0.18, 0.05, 0.08] });
+            const band = new StandardMaterial({ color: [0.25, 0.42, 0.85] });
+            this.eraserViews = spots.map(() => {
+                const e = new Entity({ name: "eraser", visible: false });
+                e.add(new Entity({ mesh: new Mesh(primitives.box(0.05, 0.025, 0.014), mat) }));
+                const sleeve = new Entity({ mesh: new Mesh(primitives.box(0.022, 0.027, 0.016), band) });
+                sleeve.setPosition(0.012, 0, 0);
+                e.add(sleeve);
+                e.interpolate = false;
+                return this.game.scene.add(e);
+            });
+        }
+        const present = new Set(out.filter((o) => o[1]).map((o) => o[0]));
+        spots.forEach((s, i) => {
+            const e = this.eraserViews[i];
+            e.visible = present.has(i);
+            if (!e.visible) return;
+            e.setPosition(s[0], s[1], s[2] + Math.sin(t * 2.2 + i) * 0.012);
+            e.setYaw(t * 1.4 + i);
+        });
+    }
+
+    /** a sparkle where an eraser was taken */
+    sparkle(spot) {
+        const s = (this.room.erasers || [])[spot];
+        if (s) this.effects.emit(18, { position: s, spread: 0.02, speed: 0.3, life: [0.3, 0.7], size: [0.016, 0], color: [1.6, 1.2, 1.3, 1], colorEnd: [1.2, 0.8, 1, 0] });
+    }
+
+    /** an ink splat: the tag's stamp, thrown off the tagged plane */
+    splat(x, y, z, ink) {
+        this.effects.emit(30, { position: [x, y, z], spread: 0.02, speed: 0.45, life: [0.5, 1.0], size: [0.024, 0.01], color: [ink[0], ink[1], ink[2], 1], colorEnd: [ink[0], ink[1], ink[2], 0] });
+    }
+
     /** A new round brings a new seed (the gust timing). */
     setSeed(seed) { this.seed = seed >>> 0; }
 

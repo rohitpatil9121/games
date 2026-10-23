@@ -1,6 +1,6 @@
-import { FLIGHT, FOLDS, DT, TICK_RATE, BTN, HISTORY } from "./data.js";
+import { FLIGHT, FOLDS, DT, TICK_RATE, BTN, HISTORY, MAX_REWIND, TAG, MATCH } from "./data.js";
 import { RingRun } from "./rings.js";
-import { dsin, dcos, datan2, clamp, PI, TAU } from "./det.js";
+import { dsin, dcos, datan2, clamp, hash3, PI, TAU } from "./det.js";
 import { sample, makeAir } from "./air.js";
 
 /**
@@ -59,6 +59,14 @@ export function createPlane(id, fold, launch) {
         inFan: 0, inLift: 0, inGust: 0,
         /** where the last glance or crumple happened, and its normal */
         hit: { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, speed: 0 },
+        /** tag: "it" (Classic) or a hunter (Ink Spread); ink is the hunters' mark in Ink Spread */
+        it: false, ink: false,
+        /** ticks as "it", tags made, erasers picked up, a shield from an eraser (Ink Spread) */
+        itTicks: 0, tags: 0, erasers: 0, shield: 0,
+        /** can't tag `noBackId` back for `noBack` more ticks */
+        noBack: 0, noBackId: 0,
+        /** ticks survived clean (Ink Spread) */
+        clean: 0,
     };
     placeAt(p, launch);
     return p;
@@ -147,7 +155,7 @@ export function stepPlane(p, input, room, seed) {
     if (p.flapBuffer > 0) {
         if (p.flapWait <= 0) {
             p.speed += FLIGHT.flapSpeed; p.bump += FLIGHT.flapLift;
-            p.flapWait = Math.round(f.flap * TICK_RATE); p.flapBuffer = 0;
+            p.flapWait = Math.round(f.flap * TICK_RATE * (p.it ? TAG.itFlap : 1)); p.flapBuffer = 0;
             p.events.push("flap");
         } else p.flapBuffer--;
     }
@@ -310,10 +318,21 @@ export function steerToward(p, yaw, pitch) {
  * tick's events. The Room (server/room.mjs) owns one and steps it; Practice runs the same Room in the page.
  * @param {object} room a room file (game/rooms)
  * @param {number} seed
- * @param {{ mode?: string, set?: number }} [options] mode "rings" (Ring Run, set `set`); tag modes come in stage 4
+ * @param {{ mode?: string, set?: number }} [options] mode "rings" (Ring Run, set `set`), "tag" (Classic Tag) or
+ *        "spread" (Ink Spread)
  */
 export function createState(room, seed, options = {}) {
-    return { room, seed: seed >>> 0, tick: 0, mode: options.mode || "rings", set: options.set || 0, phase: "play", overTicks: 0, players: [], events: [] };
+    const mode = options.mode || "rings", tag = mode === "tag" || mode === "spread";
+    return {
+        room, seed: seed >>> 0, tick: 0, mode, set: options.set || 0, phase: "play", overTicks: 0, players: [], events: [],
+        /** tag modes: ticks left in the round, ticks of grace before the first "it" is picked */
+        clock: tag ? Math.round((mode === "tag" ? TAG.classic : TAG.spread) * TICK_RATE) : 0,
+        grace: tag ? Math.round(TAG.grace * TICK_RATE) : 0,
+        /** erasers: each slot is a spot (index into room.erasers) and the tick it's back */
+        erasers: tag && room.erasers ? Array.from({ length: Math.min(TAG.eraser.slots, room.erasers.length) }, (_, i) => ({ spot: i, at: 0 })) : [],
+        /** when the round is over: who won */
+        winners: [],
+    };
 }
 
 /**
@@ -330,6 +349,9 @@ export function addPlayer(state, id, name, options = {}) {
     p.run = state.mode === "rings" ? new RingRun(state.room.rings[state.set]) : null;
     /** best Ring Run time this visit, in ticks (0 = none) */
     p.best = 0;
+    // a late arrival in Ink Spread joins the hunters: there's nothing fair about arriving clean at the end
+    if (state.mode === "spread" && state.grace === 0 && state.players.some((q) => q.it)) { p.it = true; p.ink = true; }
+    for (let i = 0; i < HISTORY; i++) { p.hist[i * 3] = p.x; p.hist[i * 3 + 1] = p.y; p.hist[i * 3 + 2] = p.z; }
     state.players.push(p);
     return p;
 }
@@ -391,6 +413,7 @@ export function step(state, inputs) {
     }
     const slot = (state.tick & (HISTORY - 1)) * 3;
     for (const p of state.players) { p.hist[slot] = p.x; p.hist[slot + 1] = p.y; p.hist[slot + 2] = p.z; }
+    if (state.mode === "tag" || state.mode === "spread") tagRules(state);
 }
 
 /**
@@ -411,6 +434,11 @@ export function applyInput(state, p, input) {
         return;
     }
     stepPlane(p, input, state.room, state.seed);
+    // tags and erasers are the server's to decide (the client's prediction has no other planes)
+    if (state.players && state.grace === 0 && state.phase === "play" && (state.mode === "tag" || state.mode === "spread")) {
+        if (p.it && p.crumpled === 0) tryTag(state, p, input.lag || 0);
+        if (p.crumpled === 0) pickEraser(state, p);
+    }
     if (p.run && p.crumpled === 0 && !p.events.includes("refold")) {
         const before = p.run.next, r = p.run.step(ax, ay, az, p.x, p.y, p.z);
         if (r) {
@@ -429,4 +457,110 @@ function pushEvents(state, p) {
         else if (e === "ring" || e === "done") state.events.push({ type: e, id: p.id, ring: p.ringPassed, ticks: p.run.ticks });
         else if (e === "flap" || e === "refold" || e === "stall" || e === "restart") state.events.push({ type: e, id: p.id });
     }
+}
+
+// ------------------------------------------------------------------ tag
+
+/** Where a plane was `ago` ticks back, out of its history (TIDEFALL's positionAt, after BREACH). */
+const past = { x: 0, y: 0, z: 0 };
+export function positionAt(state, p, ago) {
+    if (!(ago > 0)) { past.x = p.x; past.y = p.y; past.z = p.z; return past; }
+    if (ago > MAX_REWIND) ago = MAX_REWIND;
+    const whole = Math.floor(ago), f = ago - whole;
+    const a = ((state.tick - whole) & (HISTORY - 1)) * 3, b = ((state.tick - whole - 1) & (HISTORY - 1)) * 3, h = p.hist;
+    past.x = h[a] + (h[b] - h[a]) * f; past.y = h[a + 1] + (h[b + 1] - h[a + 1]) * f; past.z = h[a + 2] + (h[b + 2] - h[a + 2]) * f;
+    return past;
+}
+
+/**
+ * Can this "it" (or hunter) tag anyone? Each target is tested where the tagger saw it: `lag` ticks back,
+ * capped at 200 ms (lag compensation, as BREACH's shots and TIDEFALL's shoves). The tagger itself is where
+ * its own input just put it, which is where its own screen showed it.
+ */
+function tryTag(state, p, lag) {
+    const r2 = TAG.reach * TAG.reach;
+    for (const q of state.players) {
+        if (q === p || q.it || q.crumpled > 0 || q.guard > 0) continue;
+        if (p.noBack > 0 && q.id === p.noBackId) continue;
+        const at = positionAt(state, q, lag), dx = at.x - p.x, dy = at.y - p.y, dz = at.z - p.z;
+        if (dx * dx + dy * dy + dz * dz > r2) continue;
+        if (state.mode === "spread" && q.shield > 0) {
+            q.shield = 0; q.guard = Math.round(TICK_RATE);
+            state.events.push({ type: "shield", id: p.id, target: q.id });
+            return;
+        }
+        tag(state, p, q, lag);
+        return;
+    }
+}
+
+function tag(state, p, q, lag) {
+    q.it = true;
+    if (state.mode === "spread") { q.ink = true; q.clean = q.clean || 0; }
+    else { p.it = false; q.noBack = Math.round(TAG.noTagBack * TICK_RATE); q.noBackId = p.id; }
+    p.tags++;
+    // knocked apart: the tagged plane bounces up and wobbles, the tagger veers off
+    q.bump += TAG.knock * 0.6; q.roll += 0.5; p.roll -= 0.4;
+    q.flapWait = 0;
+    state.events.push({ type: "tag", id: p.id, target: q.id, lag: Math.round(Math.min(lag, MAX_REWIND)) });
+}
+
+/** a plane picks up an eraser it flies through */
+function pickEraser(state, p) {
+    if (state.mode === "spread" && (p.it || p.shield > 0)) return;
+    const r2 = TAG.eraser.radius * TAG.eraser.radius;
+    for (const e of state.erasers) {
+        if (state.tick < e.at) continue;
+        const s = state.room.erasers[e.spot], dx = s[0] - p.x, dy = s[1] - p.y, dz = s[2] - p.z;
+        if (dx * dx + dy * dy + dz * dz > r2) continue;
+        p.erasers++;
+        if (state.mode === "spread") p.shield = 1;
+        else p.itTicks = Math.max(0, p.itTicks - Math.round(TAG.eraser.minus * TICK_RATE));
+        state.events.push({ type: "eraser", id: p.id, spot: e.spot });
+        // back after a while, at a spot no other slot uses (seeded, so every run of a seed agrees)
+        e.at = state.tick + Math.round(TAG.eraser.respawn * TICK_RATE);
+        const free = state.room.erasers.map((_, i) => i).filter((i) => !state.erasers.some((o) => o.spot === i));
+        if (free.length) e.spot = free[Math.floor(hash3(state.seed, state.tick, e.spot) * free.length)];
+        return;
+    }
+}
+
+/** the round: grace, picking the first "it", the clock, scoring, the end */
+function tagRules(state) {
+    if (state.phase !== "play") return;
+    const planes = state.players;
+    if (planes.length < 2) { state.grace = Math.round(TAG.grace * TICK_RATE); return; }
+    if (state.grace > 0) {
+        if (--state.grace === 0) pickIt(state);
+        return;
+    }
+    // nobody is "it" (they left): pick again
+    if (!planes.some((p) => p.it)) pickIt(state);
+    for (const p of planes) {
+        if (p.noBack > 0) p.noBack--;
+        if (p.it) p.itTicks++; else p.clean++;
+    }
+    state.clock--;
+    const clean = planes.filter((p) => !p.it);
+    if (state.clock <= 0 || (state.mode === "spread" && clean.length <= 1)) endRound(state);
+}
+
+function pickIt(state) {
+    const planes = state.players, p = planes[Math.floor(hash3(state.seed, state.tick, 31) * planes.length)];
+    p.it = true;
+    if (state.mode === "spread") p.ink = true;
+    state.events.push({ type: "it", id: p.id });
+}
+
+/** Classic: least time as "it" wins (ties share it). Ink Spread: whoever is still clean. */
+function endRound(state) {
+    const planes = state.players;
+    if (state.mode === "tag") {
+        let least = Infinity;
+        for (const p of planes) least = Math.min(least, p.itTicks);
+        state.winners = planes.filter((p) => p.itTicks === least).map((p) => p.id);
+    } else state.winners = planes.filter((p) => !p.it).map((p) => p.id);
+    state.phase = "over";
+    state.overTicks = Math.round(MATCH.intermission * TICK_RATE);
+    state.events.push({ type: "over" });
 }

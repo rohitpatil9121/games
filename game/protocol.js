@@ -27,10 +27,12 @@ import { BTN, FOLD_IDS, MATCH } from "./data.js";
  *
  * LAYOUT. `snap` and `in` travel as packed bytes; the rest are JSON text.
  *   in    1 type, 4 seq, 1 pitch, 1 roll, 1 buttons, 4 view tick                                  = 12 bytes
- *   snap  a header (tick, the last input applied, phase); your own plane in full (doubles where
+ *   snap  a header (tick, the last input applied, phase, the tag clock and grace, winners, erasers out:
+ *         [spot, present]); your own plane in full (doubles where
  *         prediction must restart from the server's exact numbers); then only what changed since the last
  *         snapshot this client was sent: other planes (15 bytes: millimetres, heading, pitch, bank, flags,
- *         fold), score rows; then this interval's events.
+ *         fold), score rows ([id, a, b, c, ping]: Ring Run next ring, ticks, best; Classic tags made,
+ *         ticks as "it", erasers; Ink Spread tags made, ticks clean, erasers); then this interval's events.
  * The transport is reliable and ordered, so "changed since the last one sent" needs no acknowledgements.
  * @module game/protocol
  */
@@ -45,13 +47,13 @@ export const CHAT_MAX = 120;
 export const ALL_BUTTONS = Object.values(BTN).reduce((a, b) => a | b, 0);
 
 /** flag bits of another plane in a snapshot */
-export const FLAG = Object.freeze({ crumpled: 1, stalled: 2, guard: 4, it: 8, ink: 16 });
+export const FLAG = Object.freeze({ crumpled: 1, stalled: 2, guard: 4, it: 8, ink: 16, shield: 32 });
 
 /** Set false to send everything as JSON (tools/net-test.mjs does, to measure what the packing saves). */
 export const WIRE = { binary: true };
 
 const TYPE_SNAP = 1, TYPE_IN = 2;
-const EVENT = { flap: 1, stall: 2, glance: 3, crumple: 4, refold: 5, ring: 6, done: 7, restart: 8 };
+const EVENT = { flap: 1, stall: 2, glance: 3, crumple: 4, refold: 5, ring: 6, done: 7, restart: 8, tag: 9, shield: 10, eraser: 11, it: 12, over: 13 };
 const EVENT_NAME = Object.fromEntries(Object.entries(EVENT).map(([name, code]) => [code, name]));
 const mm = (v) => Math.max(-32768, Math.min(32767, Math.round(v * 1000)));
 const TAU = Math.PI * 2;
@@ -89,12 +91,18 @@ function encodeEvent(b, e) {
     b.u8(code); b.u8(e.id);
     if (code === EVENT.glance || code === EVENT.crumple) { b.i16(mm(e.x)); b.i16(mm(e.y)); b.i16(mm(e.z)); }
     else if (code === EVENT.ring || code === EVENT.done) { b.u8(e.ring); b.u32(e.ticks); }
+    else if (code === EVENT.tag) { b.u8(e.target); b.u8(e.lag); }
+    else if (code === EVENT.shield) b.u8(e.target);
+    else if (code === EVENT.eraser) b.u8(e.spot);
 }
 function decodeEvent(b) {
     const code = b.u8(), type = EVENT_NAME[code], id = b.u8();
     if (!type) throw new Error("unknown event " + code);
     if (code === EVENT.glance || code === EVENT.crumple) return { type, id, x: b.i16() / 1000, y: b.i16() / 1000, z: b.i16() / 1000 };
     if (code === EVENT.ring || code === EVENT.done) return { type, id, ring: b.u8(), ticks: b.u32() };
+    if (code === EVENT.tag) return { type, id, target: b.u8(), lag: b.u8() };
+    if (code === EVENT.shield) return { type, id, target: b.u8() };
+    if (code === EVENT.eraser) return { type, id, spot: b.u8() };
     return { type, id };
 }
 
@@ -102,7 +110,8 @@ function decodeEvent(b) {
 function encodeYou(b, y) {
     for (const k of ["x", "y", "z", "yaw", "pitch", "roll", "speed", "bump"]) b.f64(y[k]);
     b.f32(y.vx); b.f32(y.vy); b.f32(y.vz);
-    b.u8((y.stalled ? 1 : 0) | (y.run ? 2 : 0) | (y.run && y.run.done ? 4 : 0));
+    b.u8((y.stalled ? 1 : 0) | (y.run ? 2 : 0) | (y.run && y.run.done ? 4 : 0) | (y.it ? 8 : 0) | (y.ink ? 16 : 0) | (y.shield ? 32 : 0));
+    b.u16(y.noBack); b.u8(y.noBackId);
     b.u16(y.flapWait); b.u8(y.flapBuffer); b.u8(y.crumpled); b.u8(y.guard); b.u8(y.held); b.u32(y.clock);
     b.u8(Math.max(0, FOLD_IDS.indexOf(y.fold)));
     if (y.run) { b.u8(y.run.next); b.u32(y.run.ticks); }
@@ -112,7 +121,8 @@ function decodeYou(b) {
     for (const k of ["x", "y", "z", "yaw", "pitch", "roll", "speed", "bump"]) y[k] = b.f64();
     y.vx = b.f32(); y.vy = b.f32(); y.vz = b.f32();
     const f = b.u8();
-    y.stalled = (f & 1) !== 0;
+    y.stalled = (f & 1) !== 0; y.it = (f & 8) !== 0; y.ink = (f & 16) !== 0; y.shield = f & 32 ? 1 : 0;
+    y.noBack = b.u16(); y.noBackId = b.u8();
     y.flapWait = b.u16(); y.flapBuffer = b.u8(); y.crumpled = b.u8(); y.guard = b.u8(); y.held = b.u8(); y.clock = b.u32();
     y.fold = FOLD_IDS[b.u8()] || "glider";
     y.run = f & 2 ? { next: b.u8(), ticks: b.u32(), done: (f & 4) !== 0 } : null;
@@ -123,6 +133,9 @@ function encodeSnap(m) {
     const b = new Bytes(scratch);
     b.u8(TYPE_SNAP); b.u32(m.tick); b.u32(m.ack);
     b.u8(m.ph === "over" ? 1 : 0); b.u16(m.ot);
+    b.u16(Math.max(0, m.clock)); b.u8(Math.min(255, m.grace));
+    b.u8(m.win.length); for (const id of m.win) b.u8(id);
+    b.u8(m.er.length); for (const e of m.er) { b.u8(e[0]); b.u8(e[1]); }
     encodeYou(b, m.you);
     // the others, where they changed: [id, x, y, z (mm), heading, pitch, bank, flags, fold]
     b.u8(m.p.length);
@@ -140,6 +153,9 @@ function encodeSnap(m) {
 function decodeSnap(b) {
     const m = { t: "snap", tick: b.u32(), ack: b.u32() };
     m.ph = b.u8() & 1 ? "over" : "play"; m.ot = b.u16();
+    m.clock = b.u16(); m.grace = b.u8();
+    m.win = []; for (let n = b.u8(); n > 0; n--) m.win.push(b.u8());
+    m.er = []; for (let n = b.u8(); n > 0; n--) m.er.push([b.u8(), b.u8()]);
     m.you = decodeYou(b);
     m.p = [];
     for (let n = b.u8(); n > 0; n--) m.p.push([b.u8(), b.i16() / 1000, b.i16() / 1000, b.i16() / 1000, b.u16(), b.i16(), b.i8(), b.u8(), b.u8()]);
@@ -151,7 +167,7 @@ function decodeSnap(b) {
 }
 
 export function flagsOf(p) {
-    return (p.crumpled > 0 ? FLAG.crumpled : 0) | (p.stalled ? FLAG.stalled : 0) | (p.guard > 0 ? FLAG.guard : 0) | (p.it ? FLAG.it : 0) | (p.ink ? FLAG.ink : 0);
+    return (p.crumpled > 0 ? FLAG.crumpled : 0) | (p.stalled ? FLAG.stalled : 0) | (p.guard > 0 ? FLAG.guard : 0) | (p.it ? FLAG.it : 0) | (p.ink ? FLAG.ink : 0) | (p.shield ? FLAG.shield : 0);
 }
 
 /** A snapshot row for another plane, as it travels. The room compares rows to decide who has changed. */
@@ -174,7 +190,7 @@ export function encode(message) {
     }
     return JSON.stringify(message);
 }
-const YOU_KEYS = ["x", "y", "z", "yaw", "pitch", "roll", "speed", "bump", "vx", "vy", "vz", "stalled", "flapWait", "flapBuffer", "crumpled", "guard", "held", "clock", "fold"];
+const YOU_KEYS = ["x", "y", "z", "yaw", "pitch", "roll", "speed", "bump", "vx", "vy", "vz", "stalled", "flapWait", "flapBuffer", "crumpled", "guard", "held", "clock", "fold", "it", "ink", "shield", "noBack", "noBackId"];
 const pick = (y) => Object.fromEntries(YOU_KEYS.map((k) => [k, y[k]]));
 
 /** @returns {object | null} null for anything that isn't a well-formed message */

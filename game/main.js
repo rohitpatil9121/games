@@ -1,10 +1,10 @@
 import { Game, PostFX } from "../engine/index.js";
-import { FOLDS, FOLD_IDS, DT, MATCH } from "./data.js";
+import { FOLDS, FOLD_IDS, DT, MATCH, TAG } from "./data.js";
 import { Client, Loopback, SocketTransport, Conditions } from "./net.js";
 import { PROTOCOL, NAME_MAX, FLAG, cleanText } from "./protocol.js";
 import { ROOMS } from "./rooms/index.js";
 import { GreyboxView } from "./view.js";
-import { PlaneView } from "./planeview.js";
+import { PlaneView, INK } from "./planeview.js";
 import { RollCamera, ChaseCamera } from "./camera.js";
 import { Controls, defaultBindings, keyHint } from "./controls.js";
 import { Room } from "../server/room.mjs";
@@ -14,8 +14,8 @@ import { brains } from "./bots.js";
  * PAPER PLANES: the application. Screens, the camera, and the wiring between the parts. The match lives in
  * sim.js, the room that runs it in server/room.mjs (the same class here for Practice and on the server),
  * the network in net.js (TIDEFALL's), the room's look in view.js and each plane's in planeview.js.
- * Structure follows TIDEFALL's main.js. Stage 3: Ring Run online and in Practice; tag comes in stage 4,
- * the settings screen, saving and the notebook menus in stage 7.
+ * Structure follows TIDEFALL's main.js. Modes: Ring Run, Classic Tag, Ink Spread. The settings screen,
+ * saving and the notebook menus come in stage 7.
  * @module game/main
  */
 
@@ -66,7 +66,7 @@ let room = null;
 
 function startPractice() {
     leave();
-    room = new Room({ code: "PRACTICE", mode: "rings", set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, seed: (Date.now() & 0xffffff) + 1, brains });
+    room = new Room({ code: "PRACTICE", mode: $("p-mode").value, set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, seed: (Date.now() & 0xffffff) + 1, brains });
     const link = new Conditions(new Loopback(room), conditions);
     link.settings = conditions;
     client.attach(link);
@@ -125,9 +125,10 @@ function playerName() { return cleanText($("name").value, NAME_MAX) || "Player";
     $("p-set").replaceChildren(...ROOMS.bedroom.rings.map((s, i) => new Option(s.name, String(i))));
     $("fold").replaceChildren(...FOLD_IDS.map((f) => new Option(FOLDS[f].name, f)));
     $("fold").value = "glider";
+    $("p-mode").addEventListener("change", () => { $("p-set").closest("label").hidden = $("p-mode").value !== "rings"; });
     $("practice").addEventListener("click", startPractice);
     $("quick").addEventListener("click", () => playOnline({}));
-    $("create").addEventListener("click", () => playOnline({ create: { mode: "rings", set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, open: true } }));
+    $("create").addEventListener("click", () => playOnline({ create: { mode: $("p-mode").value, set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, open: true } }));
     const code = $("code");
     code.addEventListener("input", () => { code.value = code.value.toUpperCase().replace(/[^A-Z]/g, ""); });
     $("join-form").addEventListener("submit", (e) => { e.preventDefault(); if (code.value.length === 4 && online.up) playOnline({ room: code.value }); else code.focus(); });
@@ -177,6 +178,8 @@ function setupRoom() {
         mine = new PlaneView(game.scene, { effects: view.effects });
     }
     view.setSeed(r.seed);
+    $("results").hidden = true;
+    shown = false;
     const set = r.mode === "rings" ? ROOMS[r.room].rings[r.set] : null;
     view.showRings(set);
     view.updateRings(0);
@@ -195,7 +198,8 @@ client.on("welcome", () => {
     $("invite").textContent = "Copy invite link";
     awaitingFirst = true;
 });
-client.on("start", () => { setupRoom(); notice("A new round", 3); awaitingFirst = true; });
+client.on("start", () => { setupRoom(); notice(MODE_NAME[client.room.mode], 3); awaitingFirst = true; });
+const MODE_NAME = { rings: "Ring Run", tag: "Classic Tag", spread: "Ink Spread" };
 client.on("close", (reason) => {
     const was = client.room && client.room.code !== "PRACTICE" ? client.room.code : online.last && online.last.room;
     toTitle();
@@ -205,12 +209,52 @@ client.on("close", (reason) => {
 client.on("roster", () => {
     for (const [id, o] of others) if (!client.players.has(id) || id === client.id) { o.view.dispose(); others.delete(id); }
 });
-// other planes' events go to their views; mine were already shown when predicted
+// other planes' events go to their views; mine were already shown when predicted; the match's are for all
 client.on("event", (e) => {
+    if (e.type === "tag" || e.type === "it" || e.type === "eraser" || e.type === "shield" || e.type === "over") return matchEvent(e);
     if (e.id === client.id) { if (e.type === "done") notice(`Set done in ${(e.ticks * DT).toFixed(2)} s`, 4); return; }
     const o = others.get(e.id);
     if (o) o.events.push(e);
 });
+const nameOf = (id) => (id === client.id ? "You" : client.players.get(id)?.name || "Someone");
+/** where a plane is drawn right now (mine predicted, others interpolated) */
+function drawnAt(id) {
+    if (id === client.id) return [at.x, at.y, at.z];
+    const s = {};
+    return client.sample(id, s) ? [s.x, s.y, s.z] : null;
+}
+function matchEvent(e) {
+    const spread = client.room.mode === "spread";
+    if (e.type === "it") {
+        notice(e.id === client.id ? (spread ? "You're the hunter! Ink them all" : "You're it! Tag someone") : `${nameOf(e.id)} ${spread ? "is the hunter" : "is it"}`, 3);
+        if (e.id === client.id) stamp(spread ? "HUNTER" : "YOU'RE IT");
+    } else if (e.type === "tag") {
+        const where = drawnAt(e.target);
+        if (where) view.splat(where[0], where[1], where[2], INK);
+        if (e.target === client.id) { stamp(spread ? "INKED" : "YOU'RE IT"); game.juice.freeze(60); game.juice.shake(0.25); }
+        else if (e.id === client.id) { stamp("TAGGED!", true); game.juice.freeze(60); game.juice.shake(0.15); }
+        feed(`${nameOf(e.id)} tagged ${nameOf(e.target).toLowerCase() === "you" ? "you" : nameOf(e.target)}`);
+    } else if (e.type === "eraser") {
+        view.sparkle(e.spot);
+        if (e.id === client.id) notice(spread ? "Eraser: the next tag won't stick" : `Eraser: ${TAG.eraser.minus} s off your time`, 2.5);
+    } else if (e.type === "shield") {
+        feed(`${nameOf(e.target)}'s eraser blocked ${nameOf(e.id)}`);
+    }
+}
+/** the rubber-stamp moment (GDD §3: the tag's impact) */
+function stamp(text, small = false) {
+    const el = $("stamp");
+    el.textContent = text;
+    el.classList.toggle("small", small);
+    el.hidden = false;
+    el.classList.remove("go"); void el.offsetWidth; el.classList.add("go");
+    clearTimeout(stamp.t); stamp.t = setTimeout(() => { el.hidden = true; }, 1300);
+}
+const feedLines = [];
+function feed(text) {
+    feedLines.push({ text, until: performance.now() + 5000 });
+    while (feedLines.length > 4) feedLines.shift();
+}
 let awaitingFirst = false;
 
 // ------------------------------------------------------------------ the fixed step
@@ -249,7 +293,9 @@ game.onRender((frameDelta, alpha) => {
     // my plane is drawn where prediction put it, smoothed through corrections
     mine.root.position[0] = at.x; mine.root.position[1] = at.y; mine.root.position[2] = at.z;
     mine.root.teleport();
+    mine.setInk(me.it || me.ink);
     mine.frame(frameDelta, settings);
+    if (client.room.mode !== "rings") view.setErasers(client.match.erasers, performance.now() / 1000);
 
     // everyone else, from interpolated snapshots
     for (const [id, info] of client.players) {
@@ -269,12 +315,15 @@ game.onRender((frameDelta, alpha) => {
         p.events.length = 0;
         for (const e of o.events) { p.events.push(e.type); if (e.x !== undefined) { p.hit.x = e.x; p.hit.y = e.y; p.hit.z = e.z; } }
         o.events.length = 0;
+        p.it = (sample.flags & FLAG.it) !== 0; p.shield = sample.flags & FLAG.shield ? 1 : 0;
+        o.view.setInk(p.it || (sample.flags & FLAG.ink) !== 0);
         o.view.step(p, FOLDS[p.fold]);
         o.view.frame(frameDelta, settings);
-        label(id, info.name, p);
+        label(id, (p.it ? "● " : "") + info.name, p);
     }
     for (const [id, el] of labels) if (!others.has(id)) { el.remove(); labels.delete(id); }
     view.frame((me.clock - 1 + alpha) * DT);
+    pointer(me);
     drawHud();
 });
 
@@ -291,6 +340,42 @@ function label(id, name, p) {
     if (s.visible) { el.textContent = name; el.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`; }
 }
 
+/**
+ * The arrow (GDD §9): when you're "it", to the nearest plane you can tag; when you're clean, to the nearest
+ * "it". On screen it sits over the plane; off screen it rides the screen's edge, pointing the way.
+ */
+const ps = {};
+function pointer(me) {
+    const el = $("arrow");
+    if (!client.room || client.room.mode === "rings" || client.match.phase !== "play" || me.crumpled > 0) { el.hidden = true; return; }
+    let best = null, bd = Infinity;
+    for (const id of client.players.keys()) {
+        if (id === client.id || !client.sample(id, ps)) continue;
+        const theyIt = (ps.flags & FLAG.it) !== 0;
+        if (me.it ? theyIt : !theyIt) continue;
+        const d = Math.hypot(ps.x - at.x, ps.y - at.y, ps.z - at.z);
+        if (d < bd) { bd = d; best = [ps.x, ps.y, ps.z]; }
+    }
+    if (!best) { el.hidden = true; return; }
+    el.hidden = false;
+    el.classList.toggle("hunt", !!me.it);
+    const w = canvas.clientWidth, h = canvas.clientHeight, s = camera.project(best, w, h);
+    const inside = s.visible && s.x > 40 && s.x < w - 40 && s.y > 40 && s.y < h - 40;
+    let x, y, ang;
+    if (inside) { x = s.x; y = s.y - 26; ang = Math.PI / 2; }
+    else {
+        // direction on screen: project onto the camera's right and up, flipped if behind
+        const vx = best[0] - camera.eye[0], vy = best[1] - camera.eye[1], vz = best[2] - camera.eye[2];
+        const rx = vx * camera.right[0] + vy * camera.right[1] + vz * camera.right[2], uy = vx * camera.up[0] + vy * camera.up[1] + vz * camera.up[2];
+        ang = Math.atan2(-uy, rx);
+        const cx = w / 2, cy = h / 2, k = Math.min((w / 2 - 34) / Math.abs(Math.cos(ang) || 1e-6), (h / 2 - 34) / Math.abs(Math.sin(ang) || 1e-6));
+        x = cx + Math.cos(ang) * k; y = cy + Math.sin(ang) * k;
+    }
+    el.style.transform = `translate(${x}px, ${y}px) rotate(${ang}rad)`;
+    el.querySelector("span").textContent = `${bd.toFixed(1)} m`;
+    el.querySelector("span").style.transform = `rotate(${-ang}rad)`;
+}
+
 const TIPS = { thermal: "Circle in the warm air to climb", fan: "Ride the fan's stream", stall: "Climb to the high ring. Stalled? Dive to pick up speed" };
 let hudAt = 0;
 function drawHud() {
@@ -301,7 +386,13 @@ function drawHud() {
     $("notice").hidden = now > noticeUntil;
     $("flap").style.setProperty("--charge", String(me.flapWait <= 0 ? 1 : 1 - (me.flapWait * DT) / f.flap));
     $("flap").classList.toggle("ready", me.flapWait <= 0);
-    $("ring").textContent = !run ? "" : run.done ? `${run.set.name}: done in ${run.seconds.toFixed(2)} s  (${keyHint(settings.bindings, "restart")} to fly it again)` : `${run.set.name}  ring ${run.next + 1} of ${run.set.rings.length}  ${run.next > 0 ? run.seconds.toFixed(1) + " s" : ""}`;
+    const mode = client.room.mode, mt = client.match;
+    const clock = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+    if (mode !== "rings") {
+        const its = [...client.players.values()].filter((p) => (p.id === client.id ? me.it : (p.flags & FLAG.it) !== 0));
+        const who = mode === "spread" ? `${its.length} hunter${its.length === 1 ? "" : "s"}, ${client.players.size - its.length} clean` : its.length ? `● ${its[0].id === client.id ? "You're it" : its[0].name + " is it"}` : "";
+        $("ring").textContent = mt.phase === "over" ? "Round over" : client.players.size < 2 ? "Waiting for another plane…" : mt.grace > 0 ? `${MODE_NAME[mode]}: picking ${mode === "spread" ? "the hunter" : "who's it"} in ${Math.ceil(mt.grace / 60)}` : `${MODE_NAME[mode]}  ${clock(mt.clock * DT)}   ${who}`;
+    } else $("ring").textContent = !run ? "" : run.done ? `${run.set.name}: done in ${run.seconds.toFixed(2)} s  (${keyHint(settings.bindings, "restart")} to fly it again)` : `${run.set.name}  ring ${run.next + 1} of ${run.set.rings.length}  ${run.next > 0 ? run.seconds.toFixed(1) + " s" : ""}`;
     const aimEl = $("aim");
     aimEl.hidden = controls.mode !== "mouse" || me.crumpled > 0;
     if (!aimEl.hidden) {
@@ -320,13 +411,20 @@ function drawHud() {
     else { tipEl.style.left = "50%"; tipEl.style.top = "22%"; }
     const until = view.gustIn((me.clock || 0) * DT);
     $("caption").textContent = until > 0 && until < 1.5 ? "The curtains stir: a gust is coming" : until <= 0 ? "Gust from the window" : "";
-    // who is here and how far through the set they are
-    const rows = [...client.players.values()].map((p) => `<li${p.id === client.id ? ' class="me"' : ""}><span></span> ${p.next}/${run ? run.set.rings.length : 0}${p.best ? ` · ${(p.best * DT).toFixed(1)} s` : ""}</li>`);
+    // who is here and how they're doing: rings passed, or time as "it", or tags made
+    const score = (p) => (mode === "rings" ? `${p.next}/${run ? run.set.rings.length : 0}${p.best ? ` · ${(p.best * DT).toFixed(1)} s` : ""}`
+        : mode === "tag" ? `${(p.ticks * DT).toFixed(0)} s it` : plural(p.tags, "tag"));
+    const isIt = (p) => (p.id === client.id ? me.it : (p.flags & FLAG.it) !== 0);
+    const rows = [...client.players.values()].map((p) => `<li class="${p.id === client.id ? "me" : ""}${isIt(p) ? " it" : ""}"><span></span> ${score(p)}</li>`);
     const list = $("players");
     if (list.childElementCount !== rows.length || list.dataset.v !== rows.join("")) {
         list.innerHTML = rows.join(""); list.dataset.v = rows.join("");
         [...list.querySelectorAll("li span")].forEach((el, i) => { const p = [...client.players.values()][i]; el.textContent = `${p.name}${p.bot ? " (bot)" : ""} · ${FOLDS[p.fold] ? FOLDS[p.fold].name : ""}`; });
     }
+    const fe = $("feed"), live = feedLines.filter((l) => l.until > now);
+    if (fe.dataset.n !== String(live.length) + (live[0] ? live[0].until : "")) { fe.replaceChildren(...live.map((l) => { const li = document.createElement("li"); li.textContent = l.text; return li; })); fe.dataset.n = String(live.length) + (live[0] ? live[0].until : ""); }
+    if (mt.phase === "over" && mode !== "rings" && !shown) results();
+    if (mt.phase === "over") $("results-next").textContent = `Next round in ${Math.ceil(mt.overTicks * DT)} s`;
     if (!$("debug").hidden) {
         const st = client.stats;
         $("debug").textContent =
@@ -334,6 +432,24 @@ function drawHud() {
             `ping ${client.ping} ms  in ${(st.bytesIn / 1024).toFixed(1)} kB/s  out ${(st.bytesOut / 1024).toFixed(1)} kB/s  snaps ${st.snaps}/s\n` +
             `prediction error ${st.lastError.toFixed(4)} m  corrections ${st.corrections}  replayed ${st.replayed}  ${(game.loop.fps || 0).toFixed(0)} fps`;
     }
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+/** the results card: Classic by least time as "it", Ink Spread by who stayed clean, then tags */
+let shown = false;
+function results() {
+    shown = true;
+    const mode = client.room.mode, win = new Set(client.match.winners);
+    const list = [...client.players.values()].sort((a, b) => (win.has(b.id) - win.has(a.id)) || (mode === "tag" ? a.ticks - b.ticks : b.tags - a.tags));
+    $("results-title").textContent = win.has(client.id) ? (win.size > 1 ? "You share the win" : "You win!") : win.size ? `${[...win].map(nameOf).join(" and ")} ${win.size > 1 ? "win" : "wins"}` : "The hunters win";
+    $("results-body").replaceChildren(...list.map((p) => {
+        const tr = document.createElement("tr");
+        const cells = [p.name + (p.id === client.id ? " (you)" : ""), mode === "tag" ? `${(p.ticks * DT).toFixed(1)} s it` : win.has(p.id) ? "clean" : "inked", plural(p.tags, "tag"), plural(p.erasers, "eraser")];
+        for (const c of cells) { const td = document.createElement("td"); td.textContent = c; tr.append(td); }
+        if (win.has(p.id)) tr.className = "win";
+        return tr;
+    }));
+    $("results").hidden = false;
 }
 
 window.planes = { game, client, controls, settings, get view() { return view; }, get room() { return room; }, others, startPractice, playOnline, show };
