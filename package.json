@@ -1,0 +1,10 @@
+{
+  "name": "paper-planes",
+  "private": true,
+  "type": "module",
+  "description": "PAPER PLANES: multiplayer air tag with folded paper planes, built on Projection Lab",
+  "scripts": {
+    "static": "node tools/serve.mjs 8160",
+    "test": "node tools/test.mjs"
+  }
+}
