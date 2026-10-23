@@ -10,6 +10,13 @@
  * with every plot pollinated (the best a flower garden can do). Prints coins per plot-day at the merchant's
  * prices and checks that no crop beats the median by more than 25% (the GDD's rule), counting the fragile ones
  * twice: once as if the glide home is safe, once with the expected loss of a greedy glider (FALL_RISK).
+ *
+ * Stage 5 adds the road to the ending: with the farm growing as GDD §4 plans (6 plots on days 1–2, 12 to day 5,
+ * 18 to day 10, then 24), the measured rates above (rope from rope-grass, planks from sky pine, coins from the
+ * best cash crop, sold every second day when the airship comes), on which day can the bridges be paid for, in
+ * the order of the bridge list? Reports the day the two gate bridges are done (the critical path) and the day
+ * all twelve are (the completionist), without and with pollinators. The GDD's target: the ending around day
+ * 14–16 for a steady player.
  */
 import { makeWorld, WORLD } from "../game/islands.js";
 import { createState } from "../game/sim.js";
@@ -70,4 +77,40 @@ const over = field.filter((r) => r.coins > median * 1.25);
 const overRisky = field.filter((r) => r.risky > median * 1.25);
 console.log(over.length ? `  OVER (safe glide): ${over.map((r) => r.c + " " + ((r.coins / median - 1) * 100).toFixed(0) + "%").join(", ")}` : "  ok   no crop dominates (safe glide)");
 console.log(overRisky.length ? `  OVER (greedy glide): ${overRisky.map((r) => r.c + " " + ((r.risky / median - 1) * 100).toFixed(0) + "%").join(", ")}` : "  ok   no crop dominates once a greedy glide's losses are counted");
-process.exit(over.length && overRisky.length ? 1 : 0);
+// ---------------------------------------------------------------- the road to the ending (stage 5)
+import("../game/data.js").then(({ TRADE, ROPE, MERCHANT_TIMES }) => {
+    const rate = (c, pol) => (pol ? rows.find((r) => r.c === c).pol : rows.find((r) => r.c === c).coins) / CROPS[c].value; // produce per plot-day
+    const plotsOn = (day) => (day <= 2 ? 6 : day <= 5 ? 12 : day <= 10 ? 18 : 24);
+    const GATES = ["b4", "b9"]; // willow-mill opens the Meadow gate, hive-ogate the Orchard gate (with the islands before them)
+    function road(pol) {
+        const cash = Math.max(...field.filter((r) => !CROPS[r.c].fragile).map((r) => (pol ? r.pol : r.coins)));
+        const rRope = rate("ropegrass", pol) * ROPE.ropegrass, rPlank = rate("skypine", pol);
+        let rope = 0, planks = 0, coins = 0, unsold = 0, day = 0, gateDay = 0;
+        const gates = new Set(GATES);
+        const queue = [...world.data.bridges];
+        while (queue.length && day < 60) {
+            day++;
+            // what all the bridges still to come need, less what is in hand (a farmer plans ahead, not one bridge at a time)
+            const left = queue.reduce((t, q) => ({ rope: t.rope + q.cost.rope, planks: t.planks + q.cost.planks, coins: t.coins + q.cost.fittings * TRADE.fittings }), { rope: 0, planks: 0, coins: 0 });
+            const need = { rope: Math.max(0, left.rope - rope), planks: Math.max(0, left.planks - planks), coins: Math.max(0, left.coins - coins - unsold) };
+            // split the plots in proportion to what this bridge still needs, in plot-days
+            const pd = { rope: need.rope / rRope, planks: need.planks / rPlank, coins: need.coins / cash }, total = pd.rope + pd.planks + pd.coins || 1, n = plotsOn(day);
+            rope += (n * pd.rope / total) * rRope; planks += (n * pd.planks / total) * rPlank; unsold += (n * pd.coins / total) * cash;
+            if (day >= MERCHANT_TIMES.first && (day - MERCHANT_TIMES.first) % MERCHANT_TIMES.every === 0) { coins += unsold; unsold = 0; }
+            while (queue.length && rope >= queue[0].cost.rope && planks >= queue[0].cost.planks && coins >= queue[0].cost.fittings * TRADE.fittings) {
+                const q = queue.shift(); rope -= q.cost.rope; planks -= q.cost.planks; coins -= q.cost.fittings * TRADE.fittings;
+                if (gates.has(q.id)) gates.delete(q.id);
+                if (!gates.size && !gateDay) gateDay = day;
+            }
+        }
+        return { gateDay, allDay: queue.length ? null : day };
+    }
+    const totals = world.data.bridges.reduce((t, b) => ({ rope: t.rope + b.cost.rope, planks: t.planks + b.cost.planks, fittings: t.fittings + b.cost.fittings }), { rope: 0, planks: 0, fittings: 0 });
+    const plain = road(false), pol = road(true);
+    console.log(`road to the ending: 12 bridges need ${totals.rope} rope, ${totals.planks} planks, ${totals.fittings} fittings (${totals.fittings * TRADE.fittings} coins)`);
+    console.log(`  without pollinators: both gate bridges by day ${plain.gateDay}, all twelve by day ${plain.allDay}`);
+    console.log(`  with pollinators:    both gate bridges by day ${pol.gateDay}, all twelve by day ${pol.allDay}`);
+    const okRoad = pol.allDay && pol.allDay <= 18 && plain.gateDay <= 16;
+    console.log(okRoad ? "  ok   the ending's bridges fit the GDD's two-and-a-bit weeks" : "  FAIL the road to the ending is too long for the GDD's target");
+    process.exit((over.length && overRisky.length) || !okRoad ? 1 : 0);
+});

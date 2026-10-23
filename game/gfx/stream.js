@@ -52,7 +52,9 @@ export class Streamer {
         this.falls = [];
         this.records = world.islands.map((isl) => {
             const band = world.data.bands[isl.band] || { grass: [1, 1, 1], rock: [1, 1, 1] };
-            const rec = { isl, band, material: terrainMaterial(isl, band.rock), far: null, mid: null, near: null, want: "far", pending: new Set(), dist: Infinity };
+            const rec = { isl, band, material: terrainMaterial(isl, band.rock), far: null, mid: null, near: null, want: "far", pending: new Set(), dist: Infinity,
+                /** 1 parched .. 0 green: eased toward the island's restored state; shared by its grass meshes */
+                dry: { u_dry: isl.id === world.islands[0].id ? 0 : 1 }, sailAngle: 0 };
             rec.far = this.buildFar(rec);
             return rec;
         });
@@ -75,6 +77,18 @@ export class Streamer {
         yield;
         const lm = landmarkGeometry(this.world.shapes.get(isl.id), 0.6);
         if (lm) out.push(new Entity({ name: isl.id + "-landmark", mesh: new Mesh(lm, this.pm) }));
+        const sails = landmarkGeometry(this.world.shapes.get(isl.id), 0.6, "sails");
+        let sailEntity = null;
+        if (sails) {
+            // turn about the hub: the geometry is moved so the hub is its origin
+            const hub = this.world.shapes.get(isl.id).find((s) => s.type === "cyl" && s.kind === "timber" && s.rot[0] === Math.PI / 2);
+            const P = sails.positions;
+            for (let i = 0; i < P.length; i += 3) { P[i] -= hub.at[0]; P[i + 1] -= hub.at[1]; P[i + 2] -= hub.at[2]; }
+            sailEntity = new Entity({ name: isl.id + "-sails", mesh: new Mesh(sails, this.pm) });
+            sailEntity.setPosition(hub.at[0], hub.at[1], hub.at[2]);
+            sailEntity.cullRadius = 6;
+            out.push(sailEntity);
+        }
         // trees: one bark mesh and one leaf mesh per kind on this island
         const kinds = new Map(), fruit = [];
         const trees = [...(isl.trees || [])];
@@ -110,7 +124,7 @@ export class Streamer {
             this.view.chimneyReady = true;
         }
         yield;
-        return { entities: this.add(out), falls };
+        return { entities: this.add(out), falls, sails: sailEntity };
     }
 
     *buildNear(rec) {
@@ -118,6 +132,7 @@ export class Streamer {
         const terrain = new Entity({ name: isl.id, castShadow: false, mesh: new Mesh(islandGeometry(isl, home ? d.paths : [], 1, rec.band.grass), rec.material) });
         yield;
         const grass = yield* buildGrass(isl, this.world, this.quality, rec.band.grass);
+        for (const e of grass.entities) e.mesh.uniforms = rec.dry;
         return { entities: this.add([terrain, ...grass.entities]), terrain, grass };
     }
 
@@ -134,10 +149,19 @@ export class Streamer {
         this.stats.freed[tier]++;
     }
 
-    /** Distances, wants, jobs and what's shown. Call once a frame with the camera's position. */
-    update(eye) {
+    /**
+     * Distances, wants, jobs and what's shown. Call once a frame with the camera's position.
+     * @param {number[]} eye
+     * @param {Set<string>} [restored] the restored islands (dryness, sails, water follow it)
+     * @param {number} [dt]
+     */
+    update(eye, restored, dt = 1 / 60) {
         const S = STREAM;
         for (const rec of this.records) {
+            const green = !restored || restored.has(rec.isl.id);
+            // restoring: the island greens over about four seconds
+            rec.dry.u_dry += ((green ? 0 : 1) - rec.dry.u_dry) * Math.min(1, dt * 0.7);
+            rec.material.values.u_dry = rec.dry.u_dry;
             const isl = rec.isl, dx = isl.x - eye[0], dy = isl.y - eye[1], dz = (isl.top - eye[2]) * 0.5;
             const d = Math.max(0, Math.hypot(dx, dy, dz) - isl.radius);
             rec.dist = d;
@@ -150,14 +174,22 @@ export class Streamer {
             const showNear = !!rec.near && d < S.NEAR_DROP, showMid = !!rec.mid && !showNear;
             const showFar = !showNear && !showMid;
             for (const e of rec.far.entities) e.visible = showFar;
+            if (rec.mid && rec.mid.sails && green) {
+                // a restored mill turns, slowly, in whatever wind there is
+                rec.sailAngle += dt * 0.6;
+                const q = rec.mid.sails.rotation, h = Math.sin(rec.sailAngle / 2);
+                q[0] = 0.71 * h; q[1] = -0.71 * h; q[2] = 0; q[3] = Math.cos(rec.sailAngle / 2);
+            }
             if (rec.mid) for (const e of rec.mid.entities) {
                 // when near, the near terrain replaces the mid one; the landmark, trees and water stay
                 e.visible = showMid || (showNear && e.name !== isl.id);
+                // a parched island's water doesn't run
+                if (e.name === "water" || e.name === "waterfall") e.visible = e.visible && green;
                 e.castShadow = d < S.SHADOW && e.name !== "water" && e.name !== "waterfall";
             }
             if (rec.near) { for (const e of rec.near.entities) e.visible = showNear; if (showNear) rec.near.grass.update(eye); }
         }
-        this.falls = this.records.flatMap((r) => (r.mid && r.mid.falls) || []);
+        this.falls = this.records.filter((r) => !restored || restored.has(r.isl.id)).flatMap((r) => (r.mid && r.mid.falls) || []);
         this.run();
     }
 

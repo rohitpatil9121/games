@@ -14,6 +14,7 @@ import { makePilot, pilotInput, firstLoopPlan } from "../game/pilot.js";
 import { MOVE, TICK_RATE, BTN } from "../game/data.js";
 import { makeRandom } from "../game/det.js";
 import { weatherOf, rainingAt } from "../game/farm.js";
+import { onBridge, merchantAt, sell, buy, nextMerchantDay } from "../game/progression.js";
 import { CROPS, DAY_TICKS, WEATHER } from "../game/data.js";
 
 let failed = 0;
@@ -161,6 +162,64 @@ const world = makeWorld(WORLD);
     cp.x = c.world.data.stove.x + 0.5; cp.y = c.world.data.stove.y;
     for (let k = 0; k < 20 && !cp.meal; k++) step(c, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact });
     check(cp.meal === 15 && c.pouch.crops.turnip === 0, `turnip soup: meal +${cp.meal} s, turnips left ${c.pouch.crops.turnip}`);
+}
+
+// ---------------------------------------------------------------- bridges, restoration, trade, upgrades (stage 5)
+{
+    const s = createState(world), p = s.player, b = world.data.bridges.find((q) => q.id === "b1");
+    const press = (n = 30, until = () => false) => { for (let k = 0; k < n && !until(); k++) step(s, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact }); };
+    const standAt = (x, y) => { p.x = x; p.y = y; p.z = topAt(islandUnder(world, x, y), x, y); p.vx = p.vy = p.vz = 0; p.ground = true; p.mode = "foot"; };
+    // not enough: the bridge end says what it needs
+    standAt(b.ends[0][0], b.ends[0][1]);
+    let needs = null;
+    press(10, () => (needs = s.events.find((e) => e.type === "bridge-needs")));
+    check(!!needs && needs.missing.rope === b.cost.rope, `the bridge to Daisy Step asks for ${b.cost.rope} rope, ${b.cost.planks} planks, ${b.cost.fittings} fittings (${b.length.toFixed(0)} m)`);
+    // with them: it goes up, and both islands are restored
+    s.pouch.crops.ropegrass = b.cost.rope; s.pouch.crops.skypine = b.cost.planks; s.pouch.materials.fittings = b.cost.fittings;
+    press(10, () => s.progress.bridges.b1.state !== "broken");
+    let built = false, restoredDaisy = false;
+    for (let k = 0; k < 300 && !built; k++) { step(s, NO_INPUT); built = s.progress.bridges.b1.state === "built"; }
+    restoredDaisy = s.progress.restored.has("daisy");
+    check(built && restoredDaisy && s.pouch.crops.ropegrass === 0 && s.pouch.materials.fittings === 0, "paid for, it goes up in 4 s and restores Daisy Step");
+    // walk across it: on the deck the feet stay on the planks; the rails keep you on
+    const [a, c] = b.ends, ux = c[0] - a[0], uy = c[1] - a[1], L = Math.hypot(ux, uy);
+    const mid = onBridge(b, a[0] + ux * 0.5, a[1] + uy * 0.5);
+    p.x = a[0] + ux * 0.5; p.y = a[1] + uy * 0.5; p.z = mid.z; p.ground = true; p.vx = p.vy = p.vz = 0;
+    for (let k = 0; k < 30; k++) step(s, NO_INPUT);
+    const onDeck = Math.abs(p.z - mid.z) < 0.05 && p.ground;
+    // push sideways for two seconds
+    const side = (Math.atan2(uy, ux) + Math.PI / 2) / (Math.PI * 2) * 65536;
+    for (let k = 0; k < 120; k++) step(s, { ...NO_INPUT, my: 127, yaw: Math.round(side) & 0xffff });
+    const q = onBridge(b, p.x, p.y);
+    check(onDeck && q.side < 0.9 && p.z > 20, `standing mid-span the feet stay on the deck (z ${p.z.toFixed(2)}); walking into the rail keeps you on (${q.side.toFixed(2)} m from the middle)`);
+    // and walk along it to Daisy Step
+    const along = Math.round((Math.atan2(uy, ux) / (Math.PI * 2)) * 65536) & 0xffff;
+    for (let k = 0; k < 60 * 30 && !(islandUnder(world, p.x, p.y, p.z) === world.byId.daisy && p.ground && Math.hypot(p.x - 150, p.y - 34) < 18); k++) step(s, { ...NO_INPUT, my: 127, yaw: along });
+    check(islandUnder(world, p.x, p.y, p.z) === world.byId.daisy, `walked the ${L.toFixed(0)} m bridge to Daisy Step on foot`);
+
+    // the gate: restoring the Old Mill turns its updraft on
+    const before = s.air.length;
+    s.progress.restored.add("mill"); s.air = (await import("../game/progression.js")).activeAir(world, s.progress.restored);
+    check(s.air.length === before + 1 && s.air.some((a) => a.gate === "mill"), "restoring the Old Mill starts its updraft (the Meadow gate)");
+
+    // a heart: Hollow Log has no bridge; waking its heart restores it
+    const h = world.data.hearts.find((q) => q.island === "hollow");
+    standAt(h.x + 0.6, h.y);
+    press(10, () => s.progress.restored.has("hollow"));
+    check(s.progress.restored.has("hollow"), "waking Hollow Log's heart stone restores it");
+
+    // the merchant: moored on day 2 in the morning; sells fittings for coins earned from crops
+    const md = nextMerchantDay(0);
+    s.tick = (md - 1) * DAY_TICKS + Math.round(0.3 * DAY_TICKS);
+    s.pouch.crops.turnip = 10;
+    const coins = sell(s, "turnip", 10), got = buy(s, "fittings", 3);
+    check(merchantAt(s.tick).phase === "moored" && coins === 45 && got === 3 && s.progress.coins === 45 - 24, `the airship moors on day ${md}: 10 turnips sell for ${coins} coins, 3 fittings cost 24`);
+
+    // upgrades: sky-silk at the shed's workbench gives the 11:1, 90 s glider
+    s.pouch.materials.skysilk = 1;
+    standAt(world.data.shed.x + 1.2, world.data.shed.y - 1.2);
+    press(40, () => s.progress.tier === 1);
+    check(s.progress.tier === 1 && p.glide === 11 && p.staminaMax === 90, `sky-silk at the workbench: tier ${s.progress.tier}, glide ${p.glide}:1, stamina ${p.staminaMax} s`);
 }
 
 console.log(failed ? `${failed} failed` : "all passed");

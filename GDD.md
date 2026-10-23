@@ -89,8 +89,11 @@ compromise. I'll measure Medium in stage 2 and drop the raymarched skin if it do
   between islands (ribbons and pollen streaks, 5–12 m/s along a curve). Thermals are at least 18 m in
   radius: at cruise and full bank the glider turns in about 10 m, so a narrower one can't be circled in
   (stage 1 measured this).
-- **Stamina:** 60 s base. It drains 1/s while gliding in still or sinking air, 0 while rising in lift, and
-  a gust boost costs 8. At zero the glider folds into a slow parachute drift (2.5 m/s down), so you can
+- **Stamina:** 60 s base. It drains 1/s while gliding in still or sinking air and 0.6/s while rising in
+  lift (free below 150 m, in the warm low Meadow, so the first glides stay gentle), 1.8× faster above 400 m
+  (the High Rocks are cold); a gust boost costs 8. *(Stage 5: with climbing free everywhere, the first glider
+  could reach all twenty islands; these three rules are what make the glider tiers matter, measured by
+  `tools/check-world.mjs`.)* At zero the glider folds into a slow parachute drift (2.5 m/s down), so you can
   still reach a close island but not a far one. Landing refills it in 4 s. Cooked meals add up to +60 s
   for the day.
 - **Falling** into the cloud sea is never a fail: fade to white, you wake in your hut. Seeds stay in the
@@ -219,7 +222,13 @@ The world is generated from a fixed seed, then hand-tuned; the result is stored 
 | 20 | Crown | High (650) | the giant tree | the ending |
 
 - **Scale:** each band is about 1.4 km across, 3–5 minutes of gliding. Bridges connect islands inside a
-  band (12 bridges in total); the gate islands' restored updrafts connect the bands.
+  band (12 bridges, 110–221 m, none climbing more than 50 m); the gate islands' restored updrafts connect
+  the bands. Building a bridge restores both its islands; the three no bridge reaches (Hollow Log, Kite
+  Cliffs, the Crown) are restored by waking the heart stone at their landmark. The merchant's airship moors
+  off Hearth Isle (not the Merchant Dock, which the first days can't reach).
+- **Progression, as checked:** first glider, no gates: the whole Meadow, none of the Orchard; with the Old
+  Mill restored: the Orchard up to Kite Cliffs (sky-silk) but not all of it; sky-silk with both gates: all of
+  the Orchard and Glass Lake (frost-glass), not all of the High Rocks; frost-glass: everything.
 - **Teaching without signs:** the first glide is short, downhill and inside a visible wind current; birds
   circle every early thermal; the first thermal sits right off Hearth Isle's cliff. Each next goal is
   framed by a landmark visible from where you stand.
@@ -233,10 +242,10 @@ The world is generated from a fixed seed, then hand-tuned; the result is stored 
   to 560 m, a low-detail silhouette beyond, all fading into haze. *(Built: low-detail meshes rather than
   pre-rendered impostor cards; at 20 islands the meshes are cheaper than keeping cards lit to the moving
   sun.)* Builds run in steps under 3 ms a frame; hitches are measured (`tools/stream-test.mjs`).
-- **Check tool:** `tools/check-world.mjs`: no overlapping islands; every island reachable from home by
-  glider with each upgrade tier (simulating glides through the real air field); each next landmark visible
-  (line of sight, ≥ 1° tall) from the island before it; bridge spans 25–140 m with valid anchors; every
-  band crossable within the stamina budget it's meant for.
+- **Check tool:** `tools/check-world.mjs`: no overlapping islands; progression by glider tier and gate
+  (simulating glides through the real air field, above); each next landmark visible (line of sight, ≥ 1° tall)
+  along the routes; bridges anchored, no steeper than 15°, clear of rock. *(Spans became 110–221 m, not
+  25–140: the islands are further apart than the first table assumed.)*
 
 ## 6. Story and world
 

@@ -268,3 +268,53 @@ on Daisy Step (92 in stage 3), during streaming builds; not investigated further
 
 Not done here (later stages): selling (the merchant, stage 5), bridges needing the gardens' islands to be
 bridged first (stage 5), storm planting and the rain's look on soil and stone (stage 7), saving the farm (stage 8).
+
+## Stage 5: bridges, restoration, upgrades, the merchant
+
+Skills used: `level-design` (gating by gates and tiers, checked rather than assumed), `game-feel` (the bridge
+going up plank by plank, restoration easing in), `threejs-procedural-architecture` / `-geometry` (rope bridges,
+the airship, Captain Bram), `game-ui-ux` (the trade panel), `procedural-gen` (anchors, hearts and material caches
+placed by the generator).
+
+What was built:
+
+- `game/progression.js` (pure): 12 bridges with costs from their span (rope from rope-grass and cloud-cotton,
+  planks from sky pine or bought, iron fittings bought), built at either broken end once paid, going up over 4 s;
+  walkable decks with sag and rails; restoration (by bridge, or by waking a heart stone where no bridge goes);
+  gates (the Old Mill's and the Orchard Gate's updrafts blow only once restored); the airship's schedule (every
+  second day from day 2, moored off Hearth Isle 08:30–16:30); selling at each crop's value, buying fittings (8)
+  and planks (5); the workbench upgrades (sky-silk → 11:1 / 90 s, frost-glass → 13:1 / 120 s, storm-amber → the
+  gust boost, Shift in the air).
+- World data: bridge anchors on the islands' rims, heart stones, the three rare materials, the mooring.
+- Visuals: rope bridges (broken stubs hanging into the clouds; built ones drawn as a prefix while the planks go
+  down), parched islands that green over four seconds when restored (terrain and grass, per island), the Old
+  Mill's sails turning, Willow Pond's waterfall and pond only when restored, glowing heart stones, the airship
+  flying in and out and Captain Bram at the gangway.
+- HUD: coins, rope, planks, fittings and when the airship comes; prompts for every new action; the trade panel.
+
+The design problem from stage 3, fixed and measured (`tools/check-world.mjs`): climbing in lift was free, so the
+first glider reached all twenty islands. A sweep of the lift drain (0.3 / 0.6 / 1.0 per s) and a cold factor
+above 400 m (1.5 / 1.8): at 0.6 and 1.8 every rule holds: the first glider reaches the Meadow and none of the
+Orchard; the Meadow gate opens the Orchard as far as Kite Cliffs (sky-silk) but not all of it; sky-silk reaches
+all the Orchard and Glass Lake but only 2 of the 6 High Rocks; frost-glass reaches everything. The lift drain
+made the first loop's way home end on 0 s of stamina, so climbing stays free below 150 m (the Meadow): back to
+23 s to spare.
+
+Balance (`npm run economy`): the road to the ending. Bridges first cost one rope and one plank per 8 m and a
+fitting per 25 m (281 / 281 / 94); with the farm growing as GDD §4 plans, the gates came on day 20 and all twelve
+bridges on day 26. Two fixes: costs per 10 m and 30 m (227 / 227 / 80), and the model plans for all remaining
+bridges rather than one at a time (it had idled plots). Now: both gate bridges by day 14 and all twelve by day 18
+without pollinators, 12 and 14 with them, against the GDD's 14–16.
+
+Tests (`npm test`, all pass): the bridge asks for what it's missing; paid for, it goes up and restores Daisy
+Step; mid-span the feet stay on the deck and walking into the rail keeps you on; the 109 m bridge walked end to
+end; the Old Mill's restoration turns its updraft on; Hollow Log's heart; the airship's mooring, selling and
+buying; sky-silk at the workbench.
+
+Not done or not checked:
+
+- Storm-amber lies on Storm Teeth all the time; it should only appear during storms (stage 7).
+- The airship never moors at the Merchant Dock; the dock is scenery for now.
+- Bram has no dialogue yet (stage 6); the trade panel is the whole conversation.
+- A person hasn't tried building a bridge, the trade panel or the gust boost; the playtest only covers the first
+  loop. Frame time was not re-measured this stage (12 bridge meshes and the airship add up to 14 draws).

@@ -1,5 +1,7 @@
 import { TICK_RATE, DT, BTN, MOVE, GLIDE, STAMINA, SKY, DAY_TICKS, FARM, CROPS, CROP_IDS } from "./data.js";
 import { grow, farmDawn, weatherOf, harvestOf, afterHarvest, growsIn, cook, cookable, stepSprites } from "./farm.js";
+import { makeProgress, activeAir, restore, deckBelow, overRail, bridgeEndNear, missingFor, startBridge, stepBridges, heartNear, merchantAt, upgradeAvailable, applyUpgrade } from "./progression.js";
+import { BOOST } from "./data.js";
 import { dsin, dcos, datan2, clamp, PI, TAU, yawOf } from "./det.js";
 import { sample, makeAir } from "./air.js";
 import { topAt, groundBelow, solidAt, boxAt, islandUnder, gardenAt } from "./islands.js";
@@ -58,7 +60,11 @@ export function createState(world, options = {}) {
             const isl = islandUnder(world, it.x, it.y) || world.islands[0];
             return { id: i + 1, ...it, z: topAt(isl, it.x, it.y) + it.z, taken: false };
         }),
-        pouch: { seeds: Object.fromEntries(CROP_IDS.map((c) => [c, 0])), crops: Object.fromEntries(CROP_IDS.map((c) => [c, 0])), selected: "" },
+        pouch: { seeds: Object.fromEntries(CROP_IDS.map((c) => [c, 0])), crops: Object.fromEntries(CROP_IDS.map((c) => [c, 0])), selected: "",
+            /** bought and found things that aren't crops: bridge parts and the glider's rare materials */
+            materials: { planks: 0, fittings: 0, skysilk: 0, frostglass: 0, stormamber: 0 } },
+        /** bridges, restored islands, coins, the glider's tier (progression.js) */
+        progress: makeProgress(world),
         /** produce lost in the clouds, waiting to wash up at dawn */
         washed: [],
         /** what happened this tick: { type, ... } */
@@ -67,6 +73,8 @@ export function createState(world, options = {}) {
     };
     for (const [ix, iy] of d.tilled) state.plots.set(ix + "," + iy, makePlot(world, ix, iy));
     state.weather = weatherOf(state.seed, dayNumber(state));
+    /** the air that blows: the gates' updrafts only once their islands are restored */
+    state.air = activeAir(world, state.progress.restored);
     wake(state);
     return state;
 }
@@ -127,6 +135,7 @@ export function step(state, input = NO_INPUT) {
     grow(state, 1);
     stepPlayer(state, state.player, input);
     stepSprites(state);
+    stepBridges(state);
     return state;
 }
 
@@ -213,9 +222,9 @@ function stepFoot(state, p, input, pressed) {
 
     // across: boxes and rock walls stop each axis on its own, so you slide along them
     const nx = p.x + p.vx * DT;
-    if (blockedAt(world, nx, p.y, p.z)) p.vx = 0; else p.x = nx;
+    if (blockedAt(world, nx, p.y, p.z) || overRail(state, p.x, p.y, nx, p.y, p.z)) p.vx = 0; else p.x = nx;
     const ny = p.y + p.vy * DT;
-    if (blockedAt(world, p.x, ny, p.z)) p.vy = 0; else p.y = ny;
+    if (blockedAt(world, p.x, ny, p.z) || overRail(state, p.x, p.y, p.x, ny, p.z)) p.vy = 0; else p.y = ny;
 
     // up and down
     if (!p.ground) p.vz = Math.max(-MOVE.maxFall, p.vz - MOVE.gravity * DT);
@@ -225,7 +234,8 @@ function stepFoot(state, p, input, pressed) {
         const roof = boxAt(world, p.x, p.y, z, MOVE.radius * 0.7);
         if (roof) { z = p.z; p.vz = 0; }
     }
-    const g = groundBelow(world, p.x, p.y, Math.max(z, p.z));
+    // the ground, or a bridge's deck
+    const g = Math.max(groundBelow(world, p.x, p.y, Math.max(z, p.z)), deckBelow(state, p.x, p.y, Math.max(z, p.z), MOVE.step));
     if (z <= g) {
         z = g; p.vz = 0; p.ground = true;
         if (!wasGround) state.events.push({ type: "land", hard: fallSpeed > GLIDE.hardLanding, speed: fallSpeed });
@@ -267,6 +277,11 @@ function stepGlide(state, p, input, pressed) {
         closeGlider(state, p, "let go");
         return;
     }
+    // the gust boost (storm-amber): run is "boost" in the air
+    if ((pressed & BTN.sprint) && state.progress.boost && !p.drift && p.stamina >= BOOST.stamina) {
+        p.speed = Math.min(GLIDE.max, p.speed + BOOST.speed); p.stamina -= BOOST.stamina;
+        state.events.push({ type: "boost" });
+    }
     // ---- steering: stick right banks right, stick forward dives
     const wantRoll = (clamp(input.mx | 0, -127, 127) / 127) * GLIDE.maxRoll;
     const dr = wantRoll - p.roll, maxDr = GLIDE.rollRate * DT;
@@ -306,7 +321,7 @@ function stepGlide(state, p, input, pressed) {
     }
 
     // ---- the air
-    sample(world.data.air, state.tick * DT, p.x, p.y, p.z, air);
+    sample(state.air, state.tick * DT, p.x, p.y, p.z, air);
     p.inLift = air.lift; p.inCurrent = air.current;
     const cy = dcos(p.yaw), sy = dsin(p.yaw);
     const ax = air.x + air.tx, ay = air.y + air.ty;
@@ -317,8 +332,9 @@ function stepGlide(state, p, input, pressed) {
     p.roll -= (-ax * sy + ay * cy) * 0.05 * GLIDE.turbulence * DT * 6;
 
     // ---- stamina
-    if (!p.drift && air.z <= STAMINA.freeRise) {
-        p.stamina -= STAMINA.drain * DT;
+    if (!p.drift) {
+        const lift = air.z > STAMINA.freeRise;
+        p.stamina -= (lift ? (p.z < STAMINA.freeClimbBelow ? 0 : STAMINA.liftDrain) : STAMINA.drain) * (p.z > STAMINA.coldAbove ? STAMINA.cold : 1) * DT;
         if (p.stamina <= 0) { p.stamina = 0; p.drift = true; state.events.push({ type: "tired" }); }
     }
 
@@ -331,7 +347,9 @@ function stepGlide(state, p, input, pressed) {
         if (oz >= box.z1 - 0.25 && box.kind !== "wall") return land(state, p, x, y, box.z1);
         return bump(state, p, ox, oy, oz, (box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2);
     }
-    // touching down on an island's top
+    // touching down on a bridge's deck, or an island's top
+    const deck = deckBelow(state, x, y, oz, 0);
+    if (deck > -Infinity && z <= deck && oz >= deck - 0.8) return land(state, p, x, y, deck);
     for (const isl of world.islands) {
         const t = topAt(isl, x, y);
         if (t !== -Infinity && z <= t && oz >= t - 0.8) return land(state, p, x, y, t);
@@ -401,6 +419,14 @@ function aim(state, p) {
     const d = state.world.data, bed = d.bed;
     if (Math.hypot(p.x - bed.x, p.y - bed.y) < 1.4) { p.does = "sleep"; return; }
     if (Math.hypot(p.x - d.stove.x, p.y - d.stove.y) < 1.3) { p.does = cookable(state.pouch) ? "cook" : "stove"; return; }
+    // the shed's workbench: upgrade the glider with a rare material
+    if (Math.hypot(p.x - d.shed.x, p.y - d.shed.y) < 2.2 && upgradeAvailable(state)) { p.does = "upgrade"; return; }
+    // Captain Bram, while the airship is moored
+    if (d.merchant && merchantAt(state.tick).phase === "moored" && Math.hypot(p.x - d.merchant.gangway[0], p.y - d.merchant.gangway[1]) < 2.5) { p.does = "trade"; return; }
+    // a heart stone to wake, or a broken bridge's end
+    if (heartNear(state, p.x, p.y)) { p.does = "wake"; return; }
+    const br = bridgeEndNear(state, p.x, p.y, p.z);
+    if (br && state.progress.bridges[br.id].state === "broken") { p.does = Object.keys(missingFor(state, br)).length ? "bridge" : "build"; p.bridge = br.id; return; }
     const ix = Math.floor(p.x + p.fx * FARM.reach), iy = Math.floor(p.y + p.fy * FARM.reach);
     p.tx = ix; p.ty = iy;
     if (!p.ground || !gardenAt(state.world, ix, iy)) return;
@@ -434,6 +460,7 @@ function act(state, p) {
         it.taken = true;
         if (it.kind === "seed") { pouch.seeds[it.crop] += it.count; if (!pouch.seeds[pouch.selected]) pouch.selected = it.crop; }
         else if (it.kind === "crop") pouch.crops[it.crop] += it.count;
+        else if (it.kind === "material") pouch.materials[it.material] += it.count;
         else if (it.kind === "glider") p.hasGlider = true;
         state.events.push({ type: "pick", kind: it.kind, crop: it.crop || "", count: it.count || 1, x: it.x, y: it.y, z: it.z });
         return;
@@ -441,6 +468,14 @@ function act(state, p) {
     if (does === "sleep") {
         if (dayT(state) < 0.5) { state.events.push({ type: "not-tired" }); return; }
         sleep(state);
+        return;
+    }
+    if (does === "upgrade") { applyUpgrade(state); return; }
+    if (does === "trade") { state.events.push({ type: "trade-open" }); return; }
+    if (does === "wake") { const h = heartNear(state, p.x, p.y); restore(state, h.island, "heart"); return; }
+    if (does === "build" || does === "bridge") {
+        const b = state.world.data.bridges.find((q) => q.id === p.bridge);
+        if (does === "build") startBridge(state, b); else state.events.push({ type: "bridge-needs", bridge: b.id, missing: missingFor(state, b), cost: b.cost });
         return;
     }
     if (does === "cook") { const r = cook(state); state.events.push({ type: "cook", recipe: r.id, name: r.name, stamina: r.stamina }); return; }
@@ -478,5 +513,6 @@ export function hashState(state) {
     for (const plot of state.plots.values()) mix(plot.ix + plot.iy * 1000 + plot.crop + plot.growth + plot.watered);
     for (const c of CROP_IDS) mix(state.pouch.seeds[c] + "/" + state.pouch.crops[c]);
     for (const s of state.sprites) mix(s.x + "," + s.y);
+    mix(state.progress.coins + "/" + state.progress.tier + "/" + [...state.progress.restored].join(","));
     return h >>> 0;
 }

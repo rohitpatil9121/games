@@ -110,6 +110,7 @@ void main() {
 const fragment = /* glsl */ `
 ${header(false)}
 uniform float u_flower;       // 1 for the flower mesh
+uniform float u_dry;          // 1 = parched (per island, set on each chunk's mesh)
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec4 v_tint;
@@ -124,6 +125,7 @@ void main() {
         vec3 tip = mix(base * 1.2, vec3(0.7, 0.82, 0.34), 0.4 + v_var * 0.2);
         albedo = mix(base * 0.5, tip, smoothstep(0.0, 1.0, v_uv.y));
     }
+    albedo = mix(albedo, mix(vec3(0.6, 0.52, 0.3), vec3(0.78, 0.7, 0.45), v_uv.y) * (0.85 + 0.3 * v_var), u_dry * (u_flower > 0.5 ? 1.0 : 0.85));
     vec3 n = normalize(v_normal);
     vec3 color = paint(albedo, v_world, n, 0.5, u_flower > 0.5 ? 0.3 : 0.4 * v_uv.y);
     gl_FragColor = vec4(atmoAerial(color, v_world), 1.0);
@@ -134,8 +136,8 @@ let shared = null;
 /** one grass and one flower material for every island */
 function materials() {
     if (!shared) shared = {
-        material: track(new ShaderMaterial({ name: "grass", vertex, fragment, uniforms: withShared({ u_flower: 0, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" })),
-        flowerMat: track(new ShaderMaterial({ name: "flowers", vertex, fragment, uniforms: withShared({ u_flower: 1, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" })),
+        material: track(new ShaderMaterial({ name: "grass", vertex, fragment, uniforms: withShared({ u_flower: 0, u_dry: 0, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" })),
+        flowerMat: track(new ShaderMaterial({ name: "flowers", vertex, fragment, uniforms: withShared({ u_flower: 1, u_dry: 0, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" })),
     };
     return shared;
 }

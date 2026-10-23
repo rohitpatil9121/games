@@ -1,6 +1,6 @@
 import { dsin, dcos, datan2, hash3, smooth, clamp, TAU } from "./det.js";
 import { MOVE } from "./data.js";
-import { ISLANDS, AIR, BANDS, ITEMS, GARDENS } from "./world-data.js";
+import { ISLANDS, AIR, BANDS, ITEMS, GARDENS, BRIDGES, HEARTS, MERCHANT } from "./world-data.js";
 import { landmarkShapes, shapeBox } from "./landmarks.js";
 
 /**
@@ -50,7 +50,7 @@ export const HOME = Object.freeze({
 });
 
 /** The world: the 20 generated islands (game/world-data.js, from tools/make-world.mjs), their air, and home. */
-export const WORLD = Object.freeze({ islands: ISLANDS, air: AIR, bands: BANDS, ...HOME, items: [...HOME.items, ...ITEMS], gardens: GARDENS, seed: 20261023 });
+export const WORLD = Object.freeze({ islands: ISLANDS, air: AIR, bands: BANDS, ...HOME, items: [...HOME.items, ...ITEMS], gardens: GARDENS, bridges: BRIDGES, hearts: HEARTS, merchant: MERCHANT, seed: 20261023 });
 
 const EDGE = 4.5, EDGE_DROP = 1.6, RIM = 2.2;
 

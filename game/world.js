@@ -10,6 +10,9 @@ import { seaGeometry, seaMaterial, cumulusGeometry, cumulusMaterial } from "./gf
 import { Streamer } from "./gfx/stream.js";
 import { part, KIND, propMaterial } from "./gfx/props.js";
 import { drawCrops, drawSprites } from "./gfx/crops.js";
+import { bridgeGeometry, brokenGeometry } from "./gfx/bridges.js";
+import { airshipGeometry, bramGeometry } from "./gfx/airship.js";
+import { merchantAt } from "./progression.js";
 import { rainingAt } from "./farm.js";
 import { makeRandom } from "./det.js";
 
@@ -109,6 +112,29 @@ export class World {
         this.gliderItem = add(new Entity({ name: "glider-item", mesh: new Mesh(canopyGeometry(), pm) }));
         this.gliderItem.setScale(0.45);
 
+        // bridges: a broken and a built mesh for each; the built one draws a prefix while it's going up
+        this.bridges = (world.data.bridges || []).map((b) => {
+            const built = bridgeGeometry(b), e = add(new Entity({ name: "bridge", mesh: new Mesh(built.geometry, pm) }));
+            const broken = add(new Entity({ name: "bridge-broken", mesh: new Mesh(brokenGeometry(b), pm) }));
+            e.cullRadius = built.radius; e.visible = false;
+            return { b, built, e, broken, shown: -1 };
+        });
+        // heart stones: on the islands no bridge reaches, glowing until woken
+        const hearts = (world.data.hearts || []).filter((h) => !h.bridged);
+        this.hearts = hearts.map((h) => {
+            const g = Geometry.merge([part(primitives.sphere(0.5, 12, 8), [0, 0, 0.35], "stone", [0, 0, 0], [0.9, 0.8, 0.7]), part(primitives.sphere(0.5, 10, 8), [0, 0, 0.75], "glow", [0, 0, 0], [0.32, 0.32, 0.32], [0.6, 1.6, 1.3])], { uvs: false });
+            const e = add(new Entity({ name: "heart", mesh: new Mesh(g, pm) }));
+            e.setPosition(h.x, h.y, h.z);
+            return { h, e };
+        });
+        // the merchant's airship and Captain Bram
+        this.airship = add(new Entity({ name: "airship", mesh: new Mesh(airshipGeometry(), pm) }));
+        this.airship.cullRadius = 20; this.airship.visible = false;
+        this.bram = add(new Entity({ name: "bram", mesh: new Mesh(bramGeometry(), pm) }));
+        this.bram.visible = false;
+        const M = world.data.merchant;
+        if (M) { this.bram.setPosition(M.gangway[0], M.gangway[1], topAt(world.islands[0], M.gangway[0], M.gangway[1])); this.bram.setYaw(Math.PI); }
+
         // the target tile: a thin bright frame
         const frame = [];
         for (const [x, y, w, d] of [[0, -0.5, 1, 0.06], [0, 0.5, 1, 0.06], [-0.5, 0, 0.06, 1], [0.5, 0, 0.06, 1]]) frame.push(part(primitives.box(w, d, 0.04), [x, y, 0], "cloth", [0, 0, 0], [1, 1, 1], [1.6, 1.5, 1.2]));
@@ -207,7 +233,10 @@ export class World {
         shared.u_player.set([pose.x, pose.y, pose.z, pose.glide ? 0 : 1]);
         syncShared();
         this.sky.setPosition(eye[0], eye[1], eye[2]);
-        this.stream.update(eye);
+        this.stream.update(eye, state.progress.restored, dt);
+        this.drawBridges(state);
+        this.drawMerchant(state, eye);
+        for (const k of this.hearts) k.e.visible = !state.progress.restored.has(k.h.island);
         // the cloud sea shows the shadows of the eight islands nearest the camera
         const u = this.seaMat.values.u_islands, near = this.stream.records.slice().sort((p, q) => p.dist - q.dist);
         for (let i = 0; i < 8; i++) { const isl = near[i].isl; u[i * 4] = isl.x; u[i * 4 + 1] = isl.y; u[i * 4 + 2] = isl.radius * 0.95; u[i * 4 + 3] = isl.top; }
@@ -277,6 +306,38 @@ export class World {
         if (show) this.cursor.setPosition(p.tx + 0.5, p.ty + 0.5, topAt(this.world.islands[0], p.tx + 0.5, p.ty + 0.5) + 0.12);
     }
 
+    /** each bridge: broken, going up plank by plank, or built */
+    drawBridges(state) {
+        for (const r of this.bridges) {
+            const s = state.progress.bridges[r.b.id];
+            r.broken.visible = s.state === "broken";
+            r.e.visible = s.state !== "broken";
+            if (s.state === "building") {
+                // draw the ropes and a prefix of the planks (36 indices a plank)
+                const planks = (r.built.total - r.built.frameIndices) / 36, n = Math.floor(planks * s.progress);
+                r.built.geometry.drawCount = r.built.frameIndices + n * 36;
+            } else if (s.state === "built" && r.shown !== 1) { r.built.geometry.drawCount = r.built.total; r.shown = 1; }
+        }
+    }
+
+    /** the airship: flies in from the far side of the sky, moors off Hearth Isle, flies off the other way */
+    drawMerchant(state, eye) {
+        const M = this.world.data.merchant;
+        if (!M) return;
+        const m = merchantAt(state.tick), [mx, my, mz] = M.moor;
+        this.airship.visible = m.phase !== "away";
+        this.bram.visible = m.phase === "moored";
+        if (m.phase === "away") return;
+        const ease = (u) => u * u * (3 - 2 * u);
+        let x = mx, y = my, z = mz, yaw = Math.PI / 2;
+        if (m.phase === "arriving") { const k = 1 - ease(m.u); x = mx + 700 * k; y = my - 900 * k; z = mz + 120 * k; yaw = Math.atan2(my - y, mx - x); }
+        else if (m.phase === "leaving") { const k = ease(m.u); x = mx + 900 * k; y = my + 700 * k; z = mz + 140 * k; yaw = Math.atan2(y - my, x - mx) || Math.PI / 2; }
+        // bob gently on its ropes while moored
+        z += Math.sin(this.time * 0.6) * 0.3;
+        this.airship.setPosition(x, y, z);
+        this.airship.setYaw(yaw);
+    }
+
     /** rain round the camera while it falls (and the light dims under the cloud, in light()) */
     drawRain(state, eye, dt) {
         this.raining = rainingAt(state.seed, state.tick);
@@ -307,7 +368,7 @@ export class World {
     /** pollen up the thermals, streaks along the currents, emitted around the camera */
     drawAir(state, eye, dt) {
         const t = state.tick / 60;
-        for (const s of this.world.data.air) {
+        for (const s of state.air) {
             if (s.kind === "thermal") {
                 const near = Math.hypot(s.at[0] - eye[0], s.at[1] - eye[1]);
                 if (near > 400) continue;
@@ -315,7 +376,7 @@ export class World {
                 for (let k = 0; k < n; k++) {
                     const a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * s.radius * 0.8, z = s.bottom + 20 + this._r() * (s.top - s.bottom - 20);
                     const x = s.at[0] + Math.cos(a) * r, y = s.at[1] + Math.sin(a) * r;
-                    sample(this.world.data.air, t, x, y, z, this._air);
+                    sample(state.air, t, x, y, z, this._air);
                     // swirl around the column as they rise
                     this.pollen.emit(1, { position: [x, y, z], velocity: [-Math.sin(a) * 1.6 + this._air.x, Math.cos(a) * 1.6 + this._air.y, this._air.z], life: [4, 7], size: [0.22, 0.12], color: [1.5, 1.35, 0.8, 0.9], colorEnd: [1.2, 1.1, 0.7, 0] });
                 }
@@ -324,7 +385,7 @@ export class World {
                 for (let k = 0; k < n; k++) {
                     const u = this._r(), a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * s.radius * 0.6;
                     const x = s.from[0] + (s.to[0] - s.from[0]) * u, y = s.from[1] + (s.to[1] - s.from[1]) * u + Math.cos(a) * r, z = s.from[2] + (s.to[2] - s.from[2]) * u + Math.sin(a) * r;
-                    sample(this.world.data.air, t, x, y, z, this._air);
+                    sample(state.air, t, x, y, z, this._air);
                     this.streaks.emit(1, { position: [x, y, z], velocity: [this._air.x * 1.4, this._air.y * 1.4, this._air.z * 1.4], life: [1.5, 2.5], size: [0.16, 0.05], color: [1.6, 1.6, 1.5, 0.7], colorEnd: [1.4, 1.4, 1.4, 0] });
                 }
             }

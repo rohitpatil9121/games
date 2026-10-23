@@ -19,6 +19,16 @@ button { font: inherit; color: var(--ink); background: #fff; border: 2px solid #
 button.primary { background: var(--roof); color: #fff8ee; border-color: var(--roof); font-weight: 700; font-size: 18px; }
 button:focus-visible { outline: 3px solid #3c6e3a; outline-offset: 3px; }
 
+/* the trade panel */
+.panel.wide { max-width: 640px; }
+.trade-cols { display: flex; gap: 18px; width: 100%; flex-wrap: wrap; }
+.trade-cols > div { flex: 1 1 240px; text-align: left; }
+.trade-cols h3 { margin: 0 0 6px; font-size: 15px; }
+.trade-cols ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.trade-cols li { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 15px; }
+.trade-cols li button { padding: 4px 12px; font-size: 14px; }
+#coins { position: absolute; top: var(--safe-t); right: var(--safe-r); font-size: 15px; font-weight: 600; }
+
 /* ------------------------------------------------------------------ HUD: small, at the edges */
 #hud { position: fixed; inset: 0; pointer-events: none; color: #fffdf6; text-shadow: 0 1px 3px rgba(40, 60, 70, 0.65); }
 #hud[hidden] { display: none; }

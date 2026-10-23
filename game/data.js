@@ -92,6 +92,15 @@ export const STAMINA = Object.freeze({
     freeRise: 0.3,
     /** seconds on the ground to refill completely */
     refill: 4,
+    /**
+     * per second while rising in lift (stage 5: climbing used to be free, which let the first glider reach
+     * every island; now a long climb costs something and the glider tiers matter, tools/check-world.mjs)
+     */
+    liftDrain: 0.6,
+    /** the High Rocks are cold: above this height (m) stamina drains this many times faster */
+    coldAbove: 400, cold: 1.8,
+    /** below this height (the warm, low Meadow) climbing in lift is still free: the first glides stay gentle */
+    freeClimbBelow: 150,
     /** out of stamina: the canopy folds into a slow drift */
     driftSink: 2.5,
     driftSpeed: 5,
@@ -172,6 +181,26 @@ export const RECIPES = Object.freeze([
     Object.freeze({ id: "turnip-soup", name: "Turnip soup", needs: { turnip: 2 }, stamina: 15 }),
 ]);
 export const MEALS = Object.freeze({ maxBonus: 60 });
+
+/**
+ * Progression (GDD §4): what bridges, trade and upgrades cost and give.
+ *   prices     what Captain Bram pays (each crop's `value`) and asks: fittings and planks
+ *   rope       a bridge's rope comes from rope-grass (1 each) and cloud-cotton (2 each, strong rope)
+ *   build      ticks a bridge takes to go up once paid for (planks laid one by one)
+ *   upgrades   the glider tiers, in order, and the material each needs (at the shed's workbench)
+ */
+export const TRADE = Object.freeze({ fittings: 8, planks: 5 });
+export const ROPE = Object.freeze({ ropegrass: 1, cotton: 2 });
+export const BUILD = Object.freeze({ ticks: 240, reach: 2.4 });
+export const UPGRADES = Object.freeze([
+    Object.freeze({ tier: 0, glide: 9, stamina: 60 }),
+    Object.freeze({ tier: 1, glide: 11, stamina: 90, needs: "skysilk", name: "Sky-silk canopy" }),
+    Object.freeze({ tier: 2, glide: 13, stamina: 120, needs: "frostglass", name: "Frost-glass spars" }),
+]);
+/** the gust boost (storm-amber): a push of airspeed for some stamina */
+export const BOOST = Object.freeze({ speed: 6, stamina: 8, needs: "stormamber" });
+/** the merchant's airship: every `every` days from day `first`, it arrives, moors and leaves at these fractions of the day */
+export const MERCHANT_TIMES = Object.freeze({ every: 2, first: 2, arrive: 0.12, moor: 0.18, leave: 0.58, gone: 0.66 });
 
 /** Weather per day (GDD §11), seeded: chances, and when in the day the rain falls */
 export const WEATHER = Object.freeze({

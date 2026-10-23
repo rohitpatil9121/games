@@ -17,7 +17,19 @@
     <p class="tag">Grow a garden on an island in the sky. Glide to the next one.</p>
     <button id="start" class="primary">Wake up</button>
     <p class="small">Mouse to look · WASD to walk (and to steer the glider) · Space to jump, and again in the air to glide · E to use · Q for the next seed · Shift to run</p>
-    <p class="small">Stage 1 prototype: greybox shapes, the first loop only.</p>
+    <p class="small">Early build: the farm, the islands, the bridges and the airship.</p>
+  </div>
+</section>
+
+<section id="trade" class="screen" hidden aria-labelledby="trade-h">
+  <div class="panel wide">
+    <h2 id="trade-h">Captain Bram's airship</h2>
+    <p class="small" id="trade-coins"></p>
+    <div class="trade-cols">
+      <div><h3>He buys</h3><ul id="trade-sell"></ul></div>
+      <div><h3>He sells</h3><ul id="trade-buy"></ul></div>
+    </div>
+    <button id="trade-close" class="primary">Done</button>
   </div>
 </section>
 
@@ -30,6 +42,7 @@
 
 <div id="hud" hidden>
   <div id="clock" aria-live="off"></div>
+  <div id="coins" aria-label="Coins and bridge materials"></div>
   <div id="pouch" aria-label="Seed pouch"></div>
   <div id="prompt" role="status"></div>
   <div id="notice" role="status"></div>

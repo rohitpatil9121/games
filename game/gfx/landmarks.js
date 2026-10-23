@@ -28,10 +28,12 @@ function prim(type, size, detail, open) {
  * @param {number} detail
  * @returns {Geometry | null}
  */
-export function landmarkGeometry(shapes, detail = 1) {
+export function landmarkGeometry(shapes, detail = 1, which = "body") {
     const parts = [];
     for (const s of shapes) {
         if (s.invisible) continue;
+        // the windmill's sails are their own mesh (they turn once the mill is restored)
+        if ((which === "sails") !== (s.sail !== undefined)) continue;
         let g, scale;
         if (s.type === "box") { g = prim("box", 0, detail); scale = s.size; }
         else if (s.type === "cyl") {

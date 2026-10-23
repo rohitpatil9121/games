@@ -105,6 +105,7 @@ const fragment = /* glsl */ `
 ${header()}
 uniform float u_top;        // the island's top height (strata are measured down from it)
 uniform vec3 u_rockTint;    // the band's rock colour (warmer in the Orchard, cooler in the High Rocks)
+uniform float u_dry;        // 1 = parched (not yet restored), 0 = green again
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec4 v_color;
@@ -135,6 +136,9 @@ void main() {
         // the grassy top: baked field colour, a little fine variation (clumps, tiny bare spots)
         float fine = fbm(w.xy * 0.9), clump = vnoise(w.xy * 3.1);
         albedo = v_color.rgb * (0.9 + 0.18 * fine) * (0.94 + 0.1 * clump);
+        // parched: straw and dust, patchy, until a bridge or the heart brings the island back
+        vec3 straw = mix(vec3(0.62, 0.54, 0.34), vec3(0.55, 0.45, 0.3), fine);
+        albedo = mix(albedo, straw * (0.9 + 0.2 * clump), u_dry * (0.75 + 0.25 * smoothstep(0.3, 0.7, fbm(w.xy * 0.12))));
         wrap = 0.45;
     } else {
         float below = u_top - w.z, moss;
@@ -161,5 +165,5 @@ void main() {
 `;
 
 export function terrainMaterial(isl, rockTint = [1, 1, 1]) {
-    return track(new ShaderMaterial({ name: "island", vertex, fragment, uniforms: withShared({ u_top: isl.top, u_rockTint: Float32Array.from(rockTint) }) }));
+    return track(new ShaderMaterial({ name: "island", vertex, fragment, uniforms: withShared({ u_top: isl.top, u_rockTint: Float32Array.from(rockTint), u_dry: 0 }) }));
 }

@@ -9,6 +9,8 @@ import { Rig } from "./camera.js";
 import { Controls, defaultBindings, keyHint } from "./controls.js";
 import { makePilot, pilotInput, firstLoopPlan } from "./pilot.js";
 import { makeGradeLut } from "./gfx/grade.js";
+import { sell, buy, materials, nextMerchantDay, merchantAt } from "./progression.js";
+import { TRADE } from "./data.js";
 
 /**
  * SKYFARM: the application. Screens, the camera, and the wiring between the parts. The game lives in sim.js,
@@ -63,6 +65,7 @@ function show(name) {
     screen = name;
     $("title").hidden = name !== "title";
     $("pause").hidden = name !== "pause";
+    $("trade").hidden = name !== "trade";
     $("hud").hidden = name === "title";
     controls.active = name === "play";
     controls.showTouch(name === "play");
@@ -92,6 +95,8 @@ game.onUpdate(() => {
 });
 
 const NAMES = Object.fromEntries(Object.entries(CROPS).map(([id, c]) => [id, c.name]));
+/** what a harvest of each crop is called in the pouch */
+const PRODUCE = { ...NAMES, berry: "Berries", skypine: "Sky pine logs", apple: "Apples", ropegrass: "Rope-grass fibre", cotton: "Cloud-cotton", sunflower: "Sunflowers", moonbean: "Moon-beans", starlily: "Star-lilies", stormbloom: "Storm-blooms", turnip: "Turnips", frostmint: "Frost-mint" };
 const BAND = { meadow: "the Meadow", orchard: "the Orchard Isles", high: "the High Rocks (above 400 m)" };
 let toldSprites = false;
 function onEvent(e) {
@@ -100,8 +105,14 @@ function onEvent(e) {
         audio.play(e.type === "land" && e.hard ? "bump" : e.type, { pitch: 0.95 + Math.random() * 0.1 });
     }
     if (e.type === "pick") notice(e.kind === "glider" ? "Grandmother's glider. Jump off an edge, then jump again to open it." : `${NAMES[e.crop] || e.crop} ${e.kind === "seed" ? "seeds" : ""} ×${e.count}`);
-    else if (e.type === "harvest") notice(`${NAMES[e.crop]} ×${e.count}${e.pollinated ? " (the sprites helped)" : ""}${e.seeds ? ", and " + (e.seeds > 1 ? e.seeds + " seeds" : "a seed") + " back" : ""}`);
+    else if (e.type === "harvest") notice(`${PRODUCE[e.crop]} ×${e.count}${e.pollinated ? " (the sprites helped)" : ""}${e.seeds ? ", and " + (e.seeds > 1 ? e.seeds + " seeds" : "a seed") + " back" : ""}`);
     else if (e.type === "wrong-band") notice(`${NAMES[e.crop]} won't grow here. It needs a garden in ${CROPS[e.crop].grows.map((b) => BAND[b]).join(" or ")}.`);
+    else if (e.type === "trade-open") openTrade();
+    else if (e.type === "bridge-needs") notice(`This bridge needs ${Object.entries(e.cost).map(([k, n]) => n + " " + k).join(", ")}. Still missing: ${Object.entries(e.missing).map(([k, n]) => n + " " + k).join(", ")}.`);
+    else if (e.type === "build-start") notice("The bridge is going up...");
+    else if (e.type === "bridge-built") notice(`The bridge is done. ${world.byId[e.b].name} is green again.`);
+    else if (e.type === "restored" && e.why === "heart") notice(`${world.byId[e.island].name} wakes up.`);
+    else if (e.type === "upgraded") notice(e.kind === "tier" ? `${e.name}: the glider goes further and lasts longer.` : "Storm-amber: Shift in the air gives a gust of speed.");
     else if (e.type === "cook") notice(`${e.name}: +${e.stamina} s of gliding today`);
     else if (e.type === "cant-cook") notice("Nothing to cook yet. Two turnips make a soup.");
     else if (e.type === "pollinated" && !toldSprites) { toldSprites = true; notice("A sprite is visiting your flowers. Crops near them will give more."); }
@@ -117,7 +128,8 @@ let noticeTimer = 0;
 function notice(text) { $("notice").textContent = text; $("notice").classList.add("on"); noticeTimer = 3.2; }
 function fade(text) { const f = $("fade"); f.textContent = text; f.classList.remove("on"); void f.offsetWidth; f.classList.add("on"); }
 
-const DOES = { till: "Till", plant: "Plant", water: "Water", harvest: "Harvest", pick: "Pick up", sleep: "Sleep", cook: "Cook", stove: "Stove" };
+const DOES = { till: "Till", plant: "Plant", water: "Water", harvest: "Harvest", pick: "Pick up", sleep: "Sleep", cook: "Cook", stove: "Stove",
+    upgrade: "Fit to the glider", trade: "Trade with Captain Bram", wake: "Wake the heart stone", build: "Build the bridge", bridge: "Look at the broken bridge" };
 game.onRender((dt, alpha) => {
     if (!window.__firstFrame) window.__firstFrame = performance.now();
     controls.look(dt);
@@ -140,6 +152,26 @@ game.onRender((dt, alpha) => {
     hud(dt);
 });
 
+// ------------------------------------------------------------------ trading with Captain Bram (progression.js sell / buy)
+function openTrade() { show("trade"); if (document.pointerLockElement) document.exitPointerLock(); fillTrade(); $("trade-close").focus(); }
+function fillTrade() {
+    const P = state.progress, pouch = state.pouch;
+    $("trade-coins").textContent = `You have ${P.coins} coins, ${pouch.materials.fittings} fittings, ${pouch.materials.planks} bought planks.`;
+    const sellRows = Object.entries(pouch.crops).filter(([, n]) => n > 0).map(([c, n]) => `<li>${PRODUCE[c]} ×${n} <span class="small">${CROPS[c].value} each</span> <button data-sell="${c}" data-n="1">Sell 1</button><button data-sell="${c}" data-n="${n}">All</button></li>`);
+    $("trade-sell").innerHTML = sellRows.join("") || "<li class='small'>Nothing to sell yet: bring him produce.</li>";
+    $("trade-buy").innerHTML = Object.entries(TRADE).map(([w, price]) => `<li>${w === "fittings" ? "Iron fittings" : "Planks"} <span class="small">${price} coins</span> <button data-buy="${w}" data-n="1">Buy 1</button><button data-buy="${w}" data-n="5">Buy 5</button></li>`).join("");
+}
+$("trade").addEventListener("click", (e) => {
+    const b = e.target instanceof HTMLElement && e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.sell) sell(state, b.dataset.sell, Number(b.dataset.n));
+    else if (b.dataset.buy) buy(state, b.dataset.buy, Number(b.dataset.n));
+    else if (b.id === "trade-close") { play(); return; }
+    audio.play("pick", { pitch: 1.2 });
+    fillTrade();
+});
+addEventListener("keydown", (e) => { if (e.code === "Escape" && screen === "trade") play(); });
+
 function hud(dt) {
     const p = state.player, pouch = state.pouch;
     const does = p.does, sel = pouch.selected;
@@ -149,12 +181,14 @@ function hud(dt) {
     $("prompt").textContent = prompt;
     $("prompt").classList.toggle("on", !!prompt);
     const seeds = Object.entries(pouch.seeds).filter(([, n]) => n > 0).map(([c, n]) => `<span class="${c === sel ? "sel" : ""}">${NAMES[c]} seed ×${n}</span>`);
-    const crops = Object.entries(pouch.crops).filter(([, n]) => n > 0).map(([c, n]) => `<span>${NAMES[c]} ×${n}</span>`);
+    const crops = Object.entries(pouch.crops).filter(([, n]) => n > 0).map(([c, n]) => `<span>${PRODUCE[c]} ×${n}</span>`);
     $("pouch").innerHTML = [...seeds, ...crops].join("") || "<span class='empty'>empty pouch</span>";
     const t = dayT(state), hours = (6 + t * 18) % 24;
     const w = state.weather, clock = (f) => { const h = (6 + f * 18) % 24; return String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0"); };
     const sky = w.kind === "rain" || w.kind === "storm" ? (t < w.rainFrom ? `${w.kind} at ${clock(w.rainFrom)}` : t < w.rainTo ? (w.kind === "storm" ? "storm" : "raining") : "clearing") : w.kind;
     $("clock").textContent = `Day ${dayNumber(state)} · ${clock(t)} · ${sky}`;
+    const mat = materials(state), m = merchantAt(state.tick);
+    $("coins").textContent = `${state.progress.coins} coins · rope ${mat.rope} · planks ${mat.planks} · fittings ${mat.fittings} · ${m.phase === "moored" ? "the airship is in" : m.phase === "arriving" ? "the airship is coming" : "airship on day " + nextMerchantDay(state.tick)}`;
     const ring = $("stamina"), frac = p.stamina / STAMINA.max;
     ring.classList.toggle("on", p.mode === "glide" && frac < 0.999);
     ring.style.setProperty("--f", String(frac));
