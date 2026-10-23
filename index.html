@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SKYFARM</title>
+<meta name="description" content="SKYFARM: glide between floating islands, find seeds, grow them at home and stitch the sky back together. A browser game on the Projection Lab engine.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%239fd4f2'/%3E%3Cpath d='M5 17h22l-4 6H9z' fill='%236fbf4a'/%3E%3Cpath d='M9 23h14l-7 6z' fill='%23b8b2a6'/%3E%3Cpath d='M13 11h6v6h-6z' fill='%23d0573f'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view" tabindex="0" aria-label="The game view"></canvas>
+
+<section id="title" class="screen" aria-labelledby="title-h">
+  <div class="panel">
+    <h1 id="title-h">SKYFARM</h1>
+    <p class="tag">Grow a garden on an island in the sky. Glide to the next one.</p>
+    <button id="start" class="primary">Wake up</button>
+    <p class="small">Mouse to look · WASD to walk (and to steer the glider) · Space to jump, and again in the air to glide · E to use · Q for the next seed · Shift to run</p>
+    <p class="small">Stage 1 prototype: greybox shapes, the first loop only.</p>
+  </div>
+</section>
+
+<section id="pause" class="screen" hidden aria-labelledby="pause-h">
+  <div class="panel">
+    <h2 id="pause-h">Paused</h2>
+    <button id="resume" class="primary">Back to the sky</button>
+  </div>
+</section>
+
+<div id="hud" hidden>
+  <div id="clock" aria-live="off"></div>
+  <div id="pouch" aria-label="Seed pouch"></div>
+  <div id="prompt" role="status"></div>
+  <div id="notice" role="status"></div>
+  <div id="stamina" aria-hidden="true"></div>
+</div>
+<div id="fade" aria-live="polite"></div>
+
+<script type="module" src="game/main.js"></script>
+</body>
+</html>

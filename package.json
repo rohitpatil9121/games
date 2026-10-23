@@ -1,0 +1,12 @@
+{
+  "name": "skyfarm",
+  "private": true,
+  "type": "module",
+  "description": "SKYFARM: a cosy open-world sky-island farming game built on Projection Lab",
+  "scripts": {
+    "start": "node tools/serve.mjs 8160",
+    "test": "node tools/test.mjs",
+    "playtest": "node tools/playtest.mjs",
+    "inspect": "node tools/inspect.mjs"
+  }
+}
