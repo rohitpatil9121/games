@@ -1,7 +1,7 @@
 import { Game, Camera, PostFX, Audio } from "../engine/index.js";
 import { TICK_RATE, CROPS, STAMINA, GLIDE } from "./data.js";
 import { quantizeYaw } from "./det.js";
-import { makeWorld, PROTOTYPE } from "./islands.js";
+import { makeWorld, WORLD } from "./islands.js";
 import { createState, step, dayT, dayNumber } from "./sim.js";
 import { World } from "./world.js";
 import { Rig } from "./camera.js";
@@ -26,7 +26,7 @@ const { renderer, camera, input } = game;
 // one final-image path (GDD §0): HDR scene → soft bloom → exposure → ACES → the Ghibli grade LUT → vignette
 renderer.postfx = new PostFX(renderer, { bloom: { threshold: 1.6, knee: 0.6, intensity: 0.32, radius: 1.2 }, exposure: 1.3, tonemap: "aces", lut: makeGradeLut(1), lutAmount: 1, vignette: 0.16, grain: 0.012, contrast: 1, saturation: 1 });
 
-const world = makeWorld(PROTOTYPE);
+const world = makeWorld(WORLD);
 // quality tier (GDD §11): low / medium / high; ?quality= picks one (the settings menu arrives in stage 8)
 const quality = ["low", "medium", "high"].includes(new URLSearchParams(location.search).get("quality")) ? new URLSearchParams(location.search).get("quality") : "medium";
 renderer.setQuality(quality === "low" ? "low" : quality === "high" ? "high" : "medium");
@@ -34,6 +34,8 @@ const view3d = new World(game, world, { quality });
 const controls = new Controls(input, canvas, settings);
 const rig = new Rig(camera);
 let state = createState(world);
+// build what is near the bed before the first frame (everything further streams in while you play)
+view3d.stream.settle([state.player.x, state.player.y, state.player.z + 2]);
 /** the player's pose last tick, for drawing between ticks */
 const prev = { x: 0, y: 0, z: 0, yaw: 0 };
 const pose = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, glide: 0, fx: 1, fy: 0, speed: 0 };
@@ -110,6 +112,7 @@ function fade(text) { const f = $("fade"); f.textContent = text; f.classList.rem
 
 const DOES = { till: "Till", plant: "Plant", water: "Water", harvest: "Harvest", pick: "Pick up", sleep: "Sleep" };
 game.onRender((dt, alpha) => {
+    if (!window.__firstFrame) window.__firstFrame = performance.now();
     controls.look(dt);
     const p = state.player, a = alpha;
     // a jump of more than a few metres in one tick is a teleport (waking up): don't draw the path between

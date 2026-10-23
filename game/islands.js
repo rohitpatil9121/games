@@ -1,5 +1,7 @@
 import { dsin, dcos, datan2, hash3, smooth, clamp, TAU } from "./det.js";
 import { MOVE } from "./data.js";
+import { ISLANDS, AIR, BANDS } from "./world-data.js";
+import { landmarkShapes, shapeBox } from "./landmarks.js";
 
 /**
  * SKYFARM: the floating islands, as shapes the simulation can stand on and the renderer can draw.
@@ -13,22 +15,14 @@ import { MOVE } from "./data.js";
  * Only + − × ÷, sqrt and det.js's dsin/datan2 are used, so every engine gets the same bits (the farm and the
  * player must replay identically in tests and, later, in co-op).
  *
- * Stage 1 has the two greybox islands below. Stage 3 replaces them with the 20 islands stored as data.
+ * The islands themselves are data (game/world-data.js); each one's landmark is shapes from game/landmarks.js,
+ * whose solid parts become collision boxes here. Boxes sit in a grid of 32 m cells, so a query only looks at the
+ * few near it.
  * @module game/islands
  */
 
-/** the prototype world: home and the first neighbour, a downhill glide apart */
-export const PROTOTYPE = Object.freeze({
-    islands: [
-        {
-            id: "hearth", name: "Hearth Isle", x: 0, y: 0, top: 60, radius: 30, depth: 34, seed: 11, hills: 1.6,
-            flats: [{ x: -6, y: -2, r: 7 }, { x: 6, y: -1, r: 6 }, { x: 4, y: 9, r: 3.5 }],
-        },
-        {
-            id: "daisy", name: "Daisy Step", x: 150, y: 34, top: 46, radius: 21, depth: 26, seed: 23, hills: 1.2,
-            flats: [{ x: 150, y: 34, r: 6 }],
-        },
-    ],
+/** Hearth Isle's own layout: the farm, the hut, the paths (the rest of the world is generated data) */
+export const HOME = Object.freeze({
     /** hut: walls as boxes with a door gap facing +x; the bed and the table are where things happen */
     hut: { x: -6, y: -2, w: 6, d: 5, h: 2.6, door: 1.6, wall: 0.3 },
     bed: { x: -8, y: -3.4 },
@@ -42,8 +36,9 @@ export const PROTOTYPE = Object.freeze({
         { points: [[3.2, 2.6], [3.4, 5.5], [3.8, 7.8]], width: 0.6 },
         { points: [[10.5, 0], [17, 2.6], [25, 5.5]], width: 0.5 },
     ],
-    /** the home tree: a big old oak on the west side, the island's landmark until the windmill turns */
+    /** the home tree: a big old oak on the west side; the little broken windmill by the south-east rim */
     tree: { x: -15, y: 8, seed: 7, height: 15 },
+    windmill: { x: 15.5, y: -13.5, r: 1.7 },
     /** where you wake */
     wake: { x: -7.4, y: -1.2, yaw: 0 },
     items: [
@@ -51,18 +46,10 @@ export const PROTOTYPE = Object.freeze({
         { kind: "glider", x: 4, y: 9, z: 1.1 },
         { kind: "seed", crop: "ropegrass", count: 3, x: 152, y: 37, z: 0.3 },
     ],
-    /** standing stones on Daisy Step (a ring around its pad; they block walking) */
-    stones: { x: 150, y: 34, r: 5.2, n: 7 },
-    /**
-     * The air (GDD §2): a thermal off Hearth Isle's west cliff, a wind current that carries you to Daisy Step,
-     * and a thermal beside Daisy Step for the way back. Format as PAPER PLANES' air sources.
-     */
-    air: [
-        { kind: "thermal", at: [-50, 6], radius: 18, bottom: 0, top: 120, rise: 3.2, riseTop: 2.2 },
-        { kind: "thermal", at: [184, 58], radius: 18, bottom: 0, top: 110, rise: 3.4, riseTop: 2.4 },
-        { kind: "current", from: [24, 6, 60], to: [132, 30, 50], radius: 11, speed: 5 },
-    ],
 });
+
+/** The world: the 20 generated islands (game/world-data.js, from tools/make-world.mjs), their air, and home. */
+export const WORLD = Object.freeze({ islands: ISLANDS, air: AIR, bands: BANDS, ...HOME });
 
 const EDGE = 4.5, EDGE_DROP = 1.6, RIM = 2.2;
 
@@ -82,6 +69,13 @@ export function prepare(island) {
     island.terms = terms;
     island.reach = island.radius * 1.15;
     island.bottomZ = island.top - island.depth - RIM;
+    // a pond's water sits a little under the ground at its middle (measured before any digging)
+    if (island.ponds) {
+        const ponds = island.ponds;
+        island.ponds = null;
+        for (const p of ponds) if (!p.stream) p.level = topAt(island, p.x0, p.y0) - 0.25;
+        island.ponds = ponds;
+    }
     return island;
 }
 
@@ -117,8 +111,21 @@ export function topAt(island, x, y, out) {
     const flat = flatness(island, x, y);
     // the plateau rounds over toward the rim like a loaf, not a table
     const e = 1 - clamp(inside / EDGE, 0, 1);
-    const z = island.top + hills * (1 - flat) * (1 - e) - EDGE_DROP * e * e;
+    let z = island.top + hills * (1 - flat) * (1 - e) - EDGE_DROP * e * e;
     if (out) out.inside = inside;
+    // ponds and streams are dug into the top (capsules: a pond is a capsule of zero length)
+    if (island.ponds) for (const p of island.ponds) {
+        const sx = p.x1 - p.x0, sy = p.y1 - p.y0, l2 = sx * sx + sy * sy;
+        const t = l2 > 0 ? clamp(((x - p.x0) * sx + (y - p.y0) * sy) / l2, 0, 1) : 0;
+        const qx = x - p.x0 - sx * t, qy = y - p.y0 - sy * t, q = Math.sqrt(qx * qx + qy * qy);
+        if (q >= p.r + 1.5) continue;
+        // a bowl below the water's level (a pond) or below the ground either side (a stream); the bank eases in
+        const floor = p.stream ? z - p.depth : p.level - p.depth;
+        const u = clamp(q / p.r, 0, 1), dug = floor + (p.stream ? p.depth : p.depth + (z - p.level)) * u * u;
+        const bank = smooth(clamp((q - p.r) / 1.5, 0, 1));
+        const carved = dug + (z - dug) * bank;
+        if (carved < z) z = carved;
+    }
     return z;
 }
 
@@ -132,9 +139,12 @@ export function bottomAt(island, x, y) {
     return island.top - RIM - island.depth * hang * rough;
 }
 
+const CELL = 32;
+const cellKey = (cx, cy) => cx * 73856093 ^ cy * 19349663;
+
 /** A world: islands plus the boxes things bump into. Built once from data. */
 export function makeWorld(data) {
-    const islands = data.islands.map((i) => prepare({ ...i, flats: i.flats.map((f) => ({ ...f })) }));
+    const islands = data.islands.map((i) => prepare(structuredClone(i)));
     const boxes = [];
     const home = islands[0];
     const groundUnder = (x, y) => topAt(home, x, y);
@@ -148,14 +158,33 @@ export function makeWorld(data) {
     box(x1 - t, h.y + h.door / 2, x1, y1, z0 + h.h, "wall");
     // the roof: you can land on it, you can't walk through it from below
     boxes.push({ x0: x0 - 0.6, y0: y0 - 0.6, x1: x1 + 0.6, y1: y1 + 0.6, z0: z0 + h.h, z1: z0 + h.h + 0.35, kind: "roof" });
-    // standing stones
-    const s = data.stones, daisy = islands[1];
-    for (let k = 0; k < s.n; k++) {
-        const a = (k / s.n) * TAU + 0.3, sx = s.x + dcos(a) * s.r, sy = s.y + dsin(a) * s.r, sz = topAt(daisy, sx, sy);
-        boxes.push({ x0: sx - 0.45, y0: sy - 0.35, x1: sx + 0.45, y1: sy + 0.35, z0: sz - 1, z1: sz + 2.2 + (k % 3) * 0.5, kind: "stone" });
+    // the home windmill's tower and the home tree's trunk
+    const w = data.windmill, wz = groundUnder(w.x, w.y);
+    boxes.push({ x0: w.x - w.r, y0: w.y - w.r, x1: w.x + w.r, y1: w.y + w.r, z0: wz - 1, z1: wz + 6, kind: "stone" });
+    const tr = data.tree, tz = groundUnder(tr.x, tr.y);
+    boxes.push({ x0: tr.x - 0.9, y0: tr.y - 0.9, x1: tr.x + 0.9, y1: tr.y + 0.9, z0: tz - 1, z1: tz + 4, kind: "timber" });
+    // every landmark's solid shapes
+    const shapes = new Map();
+    for (const isl of islands) {
+        const list = landmarkShapes(isl, (x, y) => topAt(isl, x, y));
+        shapes.set(isl.id, list);
+        for (const sh of list) if (sh.solid) boxes.push({ ...shapeBox(sh), kind: sh.kind, island: isl.id });
     }
-    return { islands, boxes, data };
+    // the grid
+    const grid = new Map();
+    for (const b of boxes) {
+        for (let cy = Math.floor(b.y0 / CELL); cy <= Math.floor(b.y1 / CELL); cy++) for (let cx = Math.floor(b.x0 / CELL); cx <= Math.floor(b.x1 / CELL); cx++) {
+            const k = cellKey(cx, cy);
+            if (!grid.has(k)) grid.set(k, []);
+            grid.get(k).push(b);
+        }
+    }
+    return { islands, boxes, grid, shapes, data, byId: Object.fromEntries(islands.map((i) => [i.id, i])) };
 }
+
+const NONE = [];
+/** the boxes in the grid cell of (x, y) (boxes that straddle cells are in each of them) */
+export function boxesAt(world, x, y) { return world.grid.get(cellKey(Math.floor(x / CELL), Math.floor(y / CELL))) || NONE; }
 
 /** The highest ground under (x, y) that the feet at height z can stand on (within a step up), or -Infinity. */
 export function groundBelow(world, x, y, z) {
@@ -164,8 +193,8 @@ export function groundBelow(world, x, y, z) {
         const t = topAt(isl, x, y);
         if (t > best && t <= z + MOVE.step + 0.01) best = t;
     }
-    for (const b of world.boxes) {
-        if (b.kind !== "roof" && b.kind !== "stone") continue;
+    for (const b of boxesAt(world, x, y)) {
+        if (b.kind === "wall") continue;
         if (x > b.x0 && x < b.x1 && y > b.y0 && y < b.y1 && b.z1 > best && b.z1 <= z + MOVE.step + 0.01) best = b.z1;
     }
     return best;
@@ -194,7 +223,7 @@ export function islandUnder(world, x, y, z = Infinity) {
 
 /** Is the point inside any box (grown by r sideways)? Returns the box or null. */
 export function boxAt(world, x, y, z, r, h = MOVE.height) {
-    for (const b of world.boxes) {
+    for (const b of boxesAt(world, x, y)) {
         if (x > b.x0 - r && x < b.x1 + r && y > b.y0 - r && y < b.y1 + r && z < b.z1 - 0.01 && z + h > b.z0) return b;
     }
     return null;

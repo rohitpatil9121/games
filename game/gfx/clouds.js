@@ -131,7 +131,8 @@ export function seaMaterial() {
  */
 export function cumulusGeometry(seed, places) {
     const rand = makeRandom(seed), parts = [];
-    const ball = primitives.sphere(1, 16, 11);
+    // a coarse ball: the volume normals and the lumps carry the shape, not the tessellation (10 x 7 = 140 triangles)
+    const ball = primitives.sphere(1, 10, 7);
     let total = 0;
     const clouds = places.map((pl) => {
         const n = 10 + Math.floor(rand() * 9), balls = [];

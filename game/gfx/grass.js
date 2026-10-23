@@ -1,5 +1,5 @@
 import { Entity, Geometry, InstancedMesh, ShaderMaterial } from "../../engine/index.js";
-import { topAt, inField } from "../islands.js";
+import { topAt, inField, boxesAt } from "../islands.js";
 import { header, vertexHeader, withShared, track } from "./common.js";
 import { fieldsAt, makeFields } from "./fields.js";
 import { makeRandom } from "../det.js";
@@ -29,8 +29,8 @@ export const GRASS = Object.freeze({
     /** tufts per square metre at full meadow */
     density: { low: 2.6, medium: 4.2, high: 6.5 },
     /** distances where a chunk starts thinning, and where it stops drawing */
-    near: { low: 18, medium: 28, high: 40 },
-    far: { low: 40, medium: 62, high: 90 },
+    near: { low: 14, medium: 20, high: 32 },
+    far: { low: 32, medium: 46, high: 76 },
     blades: 7,
     segments: 3,
 });
@@ -130,6 +130,16 @@ void main() {
 }
 `;
 
+let shared = null;
+/** one grass and one flower material for every island */
+function materials() {
+    if (!shared) shared = {
+        material: track(new ShaderMaterial({ name: "grass", vertex, fragment, uniforms: withShared({ u_flower: 0, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" })),
+        flowerMat: track(new ShaderMaterial({ name: "flowers", vertex, fragment, uniforms: withShared({ u_flower: 1, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" })),
+    };
+    return shared;
+}
+
 const FLOWER_COLORS = [[1.0, 0.97, 0.9], [1.0, 0.85, 0.3], [0.98, 0.62, 0.72], [0.55, 0.68, 1.0]];
 
 /**
@@ -137,23 +147,31 @@ const FLOWER_COLORS = [[1.0, 0.97, 0.9], [1.0, 0.85, 0.3], [0.98, 0.62, 0.72], [
  * @param {object} isl the island
  * @param {object} world for the hut, shed, field and paths
  * @param {"low"|"medium"|"high"} quality
- * @returns {{ entities: Entity[], update(eye): void, count: number }}
+ * A generator (streaming, world.js): it yields after each chunk so building a big island never stalls a frame,
+ * and returns the result when it's done. runSync() in world.js runs one straight through.
+ * @returns {Generator<void, { entities: Entity[], update(eye): void, count: number, dispose(gl): void }>}
  */
-export function buildGrass(isl, world, quality = "medium") {
+export function* buildGrass(isl, world, quality = "medium", tint = [1, 1, 1]) {
     const d = world.data, f = makeFields(), C = GRASS.chunk, rand = makeRandom(isl.seed * 977 + 13);
-    const density = GRASS.density[quality];
-    const material = track(new ShaderMaterial({ name: "grass", vertex, fragment, uniforms: withShared({ u_flower: 0, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" }));
-    const flowerMat = track(new ShaderMaterial({ name: "flowers", vertex, fragment, uniforms: withShared({ u_flower: 1, u_groundUp: new Float32Array([0, 0, 1]) }), cull: "none" }));
+    // the High Rocks are windswept: thinner grass
+    const density = GRASS.density[quality] * (isl.band === "high" ? 0.55 : 1);
+    const home = isl === world.islands[0];
+    const { material, flowerMat } = materials();
     const tuft = tuftGeometry(isl.seed, GRASS.blades, GRASS.segments), flower = flowerGeometry();
     const blocked = (x, y) => {
-        if (inField(world, Math.floor(x), Math.floor(y)) && isl === world.islands[0]) return true;
+        if (home && inField(world, Math.floor(x), Math.floor(y))) return true;
         const h = d.hut, s = d.shed;
-        if (isl === world.islands[0]) {
+        if (home) {
             if (Math.abs(x - h.x) < h.w / 2 + 0.3 && Math.abs(y - h.y) < h.d / 2 + 0.3) return true;
             if (Math.abs(x - s.x) < 1.4 && Math.abs(y - s.y) < 1.4) return true;
             if (d.tree && Math.hypot(x - d.tree.x, y - d.tree.y) < 1.6) return true;
         }
-        for (const b of world.boxes) if (b.kind === "stone" && x > b.x0 - 0.2 && x < b.x1 + 0.2 && y > b.y0 - 0.2 && y < b.y1 + 0.2) return true;
+        for (const b of boxesAt(world, x, y)) if (b.kind !== "wall" && b.kind !== "roof" && x > b.x0 - 0.2 && x < b.x1 + 0.2 && y > b.y0 - 0.2 && y < b.y1 + 0.2) return true;
+        // no grass in water
+        if (isl.ponds) for (const p of isl.ponds) {
+            const sx = p.x1 - p.x0, sy = p.y1 - p.y0, l2 = sx * sx + sy * sy, t = l2 > 0 ? Math.max(0, Math.min(1, ((x - p.x0) * sx + (y - p.y0) * sy) / l2)) : 0;
+            if (Math.hypot(x - p.x0 - sx * t, y - p.y0 - sy * t) < p.r + 0.3) return true;
+        }
         return false;
     };
     const chunks = [], entities = [];
@@ -165,14 +183,14 @@ export function buildGrass(isl, world, quality = "medium") {
         for (let y = cy * C; y < (cy + 1) * C; y += step) for (let x = cx * C; x < (cx + 1) * C; x += step) {
             const px = x + rand() * step, py = y + rand() * step, z = topAt(isl, px, py);
             if (z === -Infinity || blocked(px, py)) continue;
-            fieldsAt(isl, d.paths || [], px, py, f);
+            fieldsAt(isl, home ? d.paths || [] : [], px, py, f);
             if (f.inside < 0.25) continue;
             // sparse and short on paths and at the rim
-            if (rand() < f.wear * 0.85 || rand() < f.edge * 0.5) continue;
+            if (rand() < f.wear * 0.85 || rand() < f.edge * 0.5 || rand() < f.bare * 1.2) continue;
             const tall = (0.32 + 0.4 * f.meadow) * (1 - f.wear * 0.6) * (1 - f.edge * 0.4) * (0.8 + rand() * 0.4);
             // colour clumps: two greens from the palette, a dry-yellow streak now and then
             const g = f.meadow, dry = rand() < 0.08 ? 0.35 : 0;
-            tufts.push([px, py, z - 0.02, tall, rand() * Math.PI * 2, 0.33 + 0.14 * g + dry * 0.3, 0.6 + 0.1 * g + dry * 0.08, 0.2 + 0.04 * g - dry * 0.04]);
+            tufts.push([px, py, z - 0.02, tall, rand() * Math.PI * 2, (0.33 + 0.14 * g + dry * 0.3) * tint[0], (0.6 + 0.1 * g + dry * 0.08) * tint[1], (0.2 + 0.04 * g - dry * 0.04) * tint[2]]);
             if (f.flowers > 0 && rand() < f.flowers * 0.9) {
                 const hue = FLOWER_COLORS[Math.min(3, Math.floor((f.hue + rand() * 0.25) * 4))];
                 flowers.push([px + (rand() - 0.5) * step, py + (rand() - 0.5) * step, z - 0.02, 0.7 + rand() * 0.6, rand() * 6.28, ...hue]);
@@ -203,10 +221,16 @@ export function buildGrass(isl, world, quality = "medium") {
         }
         count += tufts.length;
         chunks.push(chunk);
+        yield;
     }
     const near = GRASS.near[quality], far = GRASS.far[quality];
     return {
         entities, count, material, flowerMat,
+        /** free the GPU buffers (the island has streamed out) */
+        dispose(gl) {
+            for (const e of entities) e.mesh.dispose(gl);
+            tuft.dispose(gl); flower.dispose(gl);
+        },
         /** distance tiers: thin chunks out with distance from the eye */
         update(eye) {
             for (const c of chunks) {

@@ -18,7 +18,7 @@ import { launch } from "./chrome.mjs";
 const ablate = process.argv.includes("--ablate");
 const [width = "1280", height = "720"] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 /** what to switch off for each ablation row: entity names, or "post" / "shadow" */
-const OFF = { none: [], cumulus: ["cumulus"], "cloud sea": ["cloud-sea"], sky: ["sky"], grass: ["grass", "flowers"], tree: ["bark", "leaves"], islands: ["hearth", "daisy"], props: ["props", "roof", "stones"], post: ["post"], shadows: ["shadow"] };
+const OFF = { none: [], cumulus: ["cumulus"], "cloud sea": ["cloud-sea"], sky: ["sky"], grass: ["grass", "flowers"], trees: ["bark", "leaves", "fruit"], "island rock": ["@islands"], landmarks: ["*-landmark"], water: ["water", "waterfall"], props: ["props", "roof"], post: ["post"], shadows: ["shadow"] };
 const VIEWS = {
     "hut door": [[-1.2, -2.4, 61.75], [8, 0.5, 60.6], 0.35, 60],
     "grass close": [[8.5, -14.5, 61.3], [14, -11, 60.2], 0.35, 55],
@@ -49,7 +49,10 @@ const measure = (v) => `(() => {
 const toggle = (names, on) => `(() => { const S = skyfarm, sc = S.game.scene; const names = ${JSON.stringify(names)};
     if (names.includes("post")) S.post.enabled = ${on};
     if (names.includes("shadow")) S.view.setShadows(${on});
-    sc.traverse((e) => { if (names.includes(e.name)) e.visible = ${on}; }); return true; })()`;
+    const ids = new Set(S.world.islands.map((i) => i.id));
+    const hit = (n) => names.includes(n) || (names.includes("@islands") && ids.has(n)) || (names.includes("*-landmark") && n && n.endsWith("-landmark"));
+    // the streamer sets visibility every frame, so hide by emptying the mesh's draw instead
+    sc.traverse((e) => { if (hit(e.name)) { if (!${on}) { e._mesh = e._mesh || e.mesh; e.mesh = null; } else if (e._mesh) { e.mesh = e._mesh; e._mesh = null; } } }); return true; })()`;
 
 try {
     if (ablate) {

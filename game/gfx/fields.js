@@ -15,7 +15,10 @@ import { vnoise, topAt } from "../islands.js";
  * @module game/gfx/fields
  */
 
-export function makeFields() { return { meadow: 0, wear: 0, flowers: 0, hue: 0, edge: 0, inside: 0 }; }
+export function makeFields() { return { meadow: 0, wear: 0, flowers: 0, hue: 0, edge: 0, inside: 0, bare: 0 }; }
+
+/** how much bare rock shows through the turf, per band (the High Rocks are windswept and stony) */
+const BARE = { meadow: 0, orchard: 0.08, high: 0.42 };
 
 /** distance from a point to a polyline */
 function toPath(path, x, y) {
@@ -47,6 +50,10 @@ export function fieldsAt(isl, paths, x, y, out) {
     const drift = vnoise(x * 0.09, y * 0.09, s + 109) * 0.7 + vnoise(x * 0.35, y * 0.35, s + 113) * 0.3;
     out.flowers = Math.max(0, (drift - 0.58) / 0.42) * (1 - wear) * (1 - out.edge * 0.7);
     out.hue = vnoise(x * 0.05, y * 0.05, s + 127);
+    // bare rock: patches where a slow noise falls under the band's share, softened at their edges
+    const b = BARE[isl.band] || 0;
+    out.bare = b > 0 ? Math.max(0, Math.min(1, (b - vnoise(x * 0.08, y * 0.08, s + 131) * 0.8 - vnoise(x * 0.3, y * 0.3, s + 137) * 0.2 + 0.1) / 0.12)) : 0;
+    out.flowers *= 1 - out.bare;
     return out;
 }
 
@@ -59,6 +66,8 @@ export function groundColor(f, out) {
     for (let i = 0; i < 3; i++) {
         let c = mix(g0[i], g1[i], m);
         c = mix(c, earth[i], Math.max(f.wear * 0.85, f.edge * 0.6));
+        // bare rock is marked with a lower alpha later; here it's a pale grey-ochre
+        c = mix(c, [0.62, 0.6, 0.56][i], f.bare);
         out[i] = c;
     }
     return out;

@@ -8,7 +8,7 @@
  * - stress: random input for minutes of play; the player is never inside rock or a wall
  * @module tools/test
  */
-import { makeWorld, PROTOTYPE, solidAt, boxAt, islandUnder } from "../game/islands.js";
+import { makeWorld, WORLD, solidAt, boxAt, islandUnder } from "../game/islands.js";
 import { createState, step, hashState, dayT, NO_INPUT } from "../game/sim.js";
 import { makePilot, pilotInput, firstLoopPlan } from "../game/pilot.js";
 import { MOVE, TICK_RATE, BTN } from "../game/data.js";
@@ -16,7 +16,7 @@ import { makeRandom } from "../game/det.js";
 
 let failed = 0;
 const check = (ok, what) => { console.log((ok ? "  ok   " : "  FAIL ") + what); if (!ok) failed++; };
-const world = makeWorld(PROTOTYPE);
+const world = makeWorld(WORLD);
 
 // ---------------------------------------------------------------- determinism
 {

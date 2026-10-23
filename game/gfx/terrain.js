@@ -19,9 +19,14 @@ import { fieldsAt, makeFields, groundColor } from "./fields.js";
  * @module game/gfx/terrain
  */
 
-const SEG = 128, TOP_RINGS = 26, DOWN_RINGS = 22;
-
-export function islandGeometry(isl, paths) {
+/**
+ * @param {object} isl
+ * @param {object[]} paths worn paths (home only)
+ * @param {number} [detail] 1 near, 0.5 mid, 0.2 far: rings and segments scale with it
+ * @param {number[]} [tint] the band's grass tint (world-data BANDS)
+ */
+export function islandGeometry(isl, paths, detail = 1, tint = [1, 1, 1]) {
+    const SEG = Math.max(20, Math.round(128 * detail)), TOP_RINGS = Math.max(5, Math.round(26 * detail)), DOWN_RINGS = Math.max(5, Math.round(22 * detail));
     const positions = [], colors = [], indices = [], rings = [];
     const f = makeFields(), c = [0, 0, 0];
     for (let j = 0; j <= TOP_RINGS; j++) {
@@ -34,7 +39,7 @@ export function islandGeometry(isl, paths) {
             positions.push(x, y, topAt(isl, x, y));
             fieldsAt(isl, paths, x, y, f);
             groundColor(f, c);
-            colors.push(c[0], c[1], c[2], 1);
+            colors.push(c[0] * tint[0], c[1] * tint[1], c[2] * tint[2], 1);
         }
         rings.push(ring);
     }
@@ -99,6 +104,7 @@ void main() {
 const fragment = /* glsl */ `
 ${header()}
 uniform float u_top;        // the island's top height (strata are measured down from it)
+uniform vec3 u_rockTint;    // the band's rock colour (warmer in the Orchard, cooler in the High Rocks)
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec4 v_color;
@@ -132,11 +138,18 @@ void main() {
         wrap = 0.45;
     } else {
         float below = u_top - w.z, moss;
-        albedo = rockColor(w, below, moss);
-        // a bumped normal from the strata field
-        vec2 e = vec2(0.35, 0.0);
-        float h0 = fbm3(w * 0.3), hx = fbm3((w + e.xyy) * 0.3), hy = fbm3((w + e.yxy) * 0.3), hz = fbm3((w + e.yyx) * 0.3);
-        n = normalize(n - vec3(hx - h0, hy - h0, hz - h0) * 2.2);
+        albedo = rockColor(w, below, moss) * u_rockTint;
+        // a bumped normal from a rock field, only where it can be seen (it fades out by 90 m; beyond that the
+        // strata colours carry the surface, and four 3D noises a pixel would be wasted)
+        float near = 1.0 - smoothstep(40.0, 90.0, length(u_camPos - w));
+        if (near > 0.0) {
+            vec2 e = vec2(0.35, 0.0);
+            float h0 = vnoise3(w * 0.3) + vnoise3(w * 0.7) * 0.4;
+            float hx = vnoise3((w + e.xyy) * 0.3) + vnoise3((w + e.xyy) * 0.7) * 0.4;
+            float hy = vnoise3((w + e.yxy) * 0.3) + vnoise3((w + e.yxy) * 0.7) * 0.4;
+            float hz = vnoise3((w + e.yyx) * 0.3) + vnoise3((w + e.yyx) * 0.7) * 0.4;
+            n = normalize(n - vec3(hx - h0, hy - h0, hz - h0) * 1.6 * near);
+        }
         // moss and grass tufts on ledges that face up
         float ledge = smoothstep(0.35, 0.75, n.z) * (0.6 + 0.4 * vnoise(w.xy * 0.5));
         albedo = mix(albedo, vec3(0.34, 0.5, 0.22), ledge * 0.8);
@@ -147,6 +160,6 @@ void main() {
 }
 `;
 
-export function terrainMaterial(isl) {
-    return track(new ShaderMaterial({ name: "island", vertex, fragment, uniforms: withShared({ u_top: isl.top }) }));
+export function terrainMaterial(isl, rockTint = [1, 1, 1]) {
+    return track(new ShaderMaterial({ name: "island", vertex, fragment, uniforms: withShared({ u_top: isl.top, u_rockTint: Float32Array.from(rockTint) }) }));
 }

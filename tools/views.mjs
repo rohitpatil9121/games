@@ -6,6 +6,7 @@
  *   node tools/views.mjs --lock          # capture and make these the baselines
  *   node tools/views.mjs --nopost        # the same views with the post chain off (the no-post baseline)
  *   node tools/views.mjs --only=grass    # views whose name contains "grass"
+ *   node tools/views.mjs --tour          # one look at every island's landmark (afternoon), no baselines
  *
  * Baselines are kept at 640 x 360 (small enough for git) and compared at that size.
  * Writes artifacts/views/<view>-<time>.png, a contact sheet artifacts/views/sheet.jpg (one image with all of
@@ -31,10 +32,19 @@ export const VIEWS = [
     { name: "2-home-wide", eye: [70, -78, 82], target: [0, 0, 52], fov: 45 },
     { name: "3-glide-toward", eye: [34, 6, 64], target: [150, 34, 46], fov: 62 },
     { name: "4-grass-close", eye: [8.5, -14.5, 61.3], target: [14, -11, 60.2], fov: 55 },
-    { name: "5-cliff-edge", eye: [-48, 26, 50], target: [-20, 8, 50], fov: 55 },
-    { name: "6-from-below", eye: [32, -70, 18], target: [0, 0, 52], fov: 50 },
+    { name: "5-waterfall", eye: [112, -246, 86], target: [157.6, -200.3, 56], fov: 55 },
+    { name: "6-high-rocks-below", eye: [1450, -270, 420], target: [1560, -110, 515], fov: 55 },
 ];
-const TIMES = [["noon", 0.35], ["golden", 0.735]];
+const tour = args.includes("--tour");
+const TIMES = tour ? [["afternoon", 0.55]] : [["noon", 0.35], ["golden", 0.735]];
+if (tour) {
+    const { ISLANDS } = await import("../game/world-data.js");
+    VIEWS.length = 0;
+    for (const i of ISLANDS) {
+        const L = i.landmark, r = i.radius;
+        VIEWS.push({ name: "tour-" + i.id, eye: [L.x + r * 0.9, L.y - r * 1.1, i.top + r * 0.45 + 4], target: [L.x, L.y, i.top + 4], fov: 55 });
+    }
+}
 
 const port = 9700 + Math.floor(Math.random() * 200);
 const server = spawn(process.execPath, [fileURLToPath(new URL("./serve.mjs", import.meta.url)), String(port)], { stdio: "ignore" });
@@ -47,6 +57,7 @@ const capture = (v, t) => `(async () => {
     S.state.player.x = 6; S.state.player.y = 9.5; S.state.player.z = 60; // out of the way, by the shed
     S.post.enabled = ${!nopost}; S.view.snapExposure = true;
     const tick = S.state.tick;
+    S.view.stream.settle(${JSON.stringify(v.eye)});
     S.run(0.4);
     S.state.tick = tick;
     const L = g.loop; L._raf = () => 0;
@@ -98,7 +109,7 @@ try {
             const file = `${v.name}-${label}${nopost ? "-nopost" : ""}.png`;
             const png = Buffer.from(r.url.split(",")[1], "base64");
             await writeFile(OUT + file, png);
-            if (lock && !nopost) await writeFile(BASE + `${v.name}-${String(t).replace(".", "_")}.png`, Buffer.from(r.smallUrl.split(",")[1], "base64"));
+            if (lock && !nopost && !tour) await writeFile(BASE + `${v.name}-${String(t).replace(".", "_")}.png`, Buffer.from(r.smallUrl.split(",")[1], "base64"));
             results.push({ file, ...r, url: undefined, smallUrl: undefined });
             console.log(`${file.padEnd(28)} entropy ${r.metrics.entropy} edges ${r.metrics.edges} contrast ${r.metrics.contrast} dominant ${r.metrics.dominant} draws ${r.draws} tris ${r.tris}` + (r.diff ? `  vs baseline: mean ${r.diff.mean}, changed ${(r.diff.changed * 100).toFixed(1)}%` : "  (no baseline)"));
         }
@@ -106,7 +117,7 @@ try {
     // a contact sheet: everything in one labelled image
     const sheet = await page.evaluate(`(async () => {
         const files = ${JSON.stringify(results.map((r) => r.file))};
-        const cols = 3, w = 480, h = 270, rows = Math.ceil(files.length / cols);
+        const cols = files.length > 12 ? 5 : 3, w = files.length > 12 ? 384 : 480, h = files.length > 12 ? 216 : 270, rows = Math.ceil(files.length / cols);
         const c = document.createElement("canvas"); c.width = cols * w; c.height = rows * h;
         const x = c.getContext("2d"); x.font = "bold 16px sans-serif";
         for (let i = 0; i < files.length; i++) {

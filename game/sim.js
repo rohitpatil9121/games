@@ -28,8 +28,9 @@ import { topAt, groundBelow, solidAt, boxAt, islandUnder, inField } from "./isla
 export const NO_INPUT = Object.freeze({ mx: 0, my: 0, yaw: 0, buttons: 0 });
 
 /** the flight-path angle the glider holds: tan = 1 / glide ratio */
-const GLIDE_ANGLE = datan2(1, GLIDE.glide);
-const DRAG_K = (GLIDE.gravity * (1 / Math.sqrt(1 + GLIDE.glide * GLIDE.glide))) / (GLIDE.cruise * GLIDE.cruise);
+/** the glide angle and drag constant for a glide ratio (upgrades raise the ratio, GDD §4) */
+const glideAngle = (ratio) => datan2(1, ratio);
+const dragK = (ratio) => (GLIDE.gravity * (1 / Math.sqrt(1 + ratio * ratio))) / (GLIDE.cruise * GLIDE.cruise);
 const OPEN_TICKS = Math.round(GLIDE.openAfter * TICK_RATE);
 const wrap = (a) => (a > PI ? a - TAU : a < -PI ? a + TAU : a);
 const air = makeAir();
@@ -83,6 +84,8 @@ export function createPlayer() {
         yaw: 0, pitch: 0, roll: 0, speed: 0, stalled: false,
         hasGlider: false,
         stamina: STAMINA.max,
+        /** the glider as upgraded: glide ratio and stamina (GDD §4: 9 → 11 → 13, 60 → 90 → 120 s) */
+        glide: GLIDE.glide, staminaMax: STAMINA.max,
         /** strongest lift and current felt this tick (0..1), for effects */
         inLift: 0, inCurrent: 0,
         /** the tile the context action would act on, and what it would do */
@@ -99,7 +102,7 @@ function wake(state) {
     const p = state.player, w = state.world.data.wake, home = state.world.islands[0];
     p.x = w.x; p.y = w.y; p.z = topAt(home, w.x, w.y);
     p.vx = p.vy = p.vz = 0; p.mode = "foot"; p.drift = false; p.ground = true; p.air = 0;
-    p.fx = dcos(w.yaw); p.fy = dsin(w.yaw); p.stamina = STAMINA.max;
+    p.fx = dcos(w.yaw); p.fy = dsin(w.yaw); p.stamina = p.staminaMax;
 }
 
 /** Advance the whole game one tick. */
@@ -240,7 +243,7 @@ function stepFoot(state, p, input, pressed) {
     } else p.ground = false;
     p.z = z;
     p.air = p.ground ? 0 : Math.min(9999, p.air + 1);
-    if (p.ground) p.stamina = Math.min(STAMINA.max, p.stamina + (STAMINA.max / STAMINA.refill) * DT);
+    if (p.ground) p.stamina = Math.min(p.staminaMax, p.stamina + (p.staminaMax / STAMINA.refill) * DT);
 }
 
 /** a wall box, or rock above the step height, in the way of a body standing at (x, y, z) */
@@ -256,7 +259,7 @@ function openGlider(state, p) {
     // the heading is where you were moving, or where you face
     p.yaw = hs > 0.5 ? datan2(p.vy, p.vx) : datan2(p.fy, p.fx);
     p.speed = Math.max(GLIDE.openSpeed, hs);
-    p.pitch = -GLIDE_ANGLE * 2; p.roll = 0; p.stalled = false;
+    p.pitch = -glideAngle(p.glide) * 2; p.roll = 0; p.stalled = false;
     state.events.push({ type: "open" });
 }
 
@@ -276,7 +279,7 @@ function stepGlide(state, p, input, pressed) {
     const wantRoll = (clamp(input.mx | 0, -127, 127) / 127) * GLIDE.maxRoll;
     const dr = wantRoll - p.roll, maxDr = GLIDE.rollRate * DT;
     p.roll += dr > maxDr ? maxDr : dr < -maxDr ? -maxDr : dr;
-    const ip = -clamp(input.my | 0, -127, 127) / 127, trim = -GLIDE_ANGLE;
+    const ip = -clamp(input.my | 0, -127, 127) / 127, trim = -glideAngle(p.glide);
     if (p.drift) {
         // no stamina: the canopy is a parachute, steering only
         p.pitch = trim;
@@ -306,7 +309,7 @@ function stepGlide(state, p, input, pressed) {
     // ---- energy
     const sp = dsin(p.pitch), cp = dcos(p.pitch), bank = p.roll < 0 ? -p.roll : p.roll;
     if (!p.drift) {
-        const drag = DRAG_K * p.speed * p.speed * (1 + GLIDE.bankDrag * (bank / GLIDE.maxRoll));
+        const drag = dragK(p.glide) * p.speed * p.speed * (1 + GLIDE.bankDrag * (bank / GLIDE.maxRoll));
         p.speed = clamp(p.speed + (-GLIDE.gravity * sp - drag) * DT, GLIDE.minSpeed, GLIDE.max);
     }
 

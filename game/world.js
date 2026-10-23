@@ -7,10 +7,8 @@ import { shared, syncShared } from "./gfx/common.js";
 import { sunLight, skyAt } from "./gfx/atmosphere.js";
 import { skyMaterial } from "./gfx/sky.js";
 import { seaGeometry, seaMaterial, cumulusGeometry, cumulusMaterial } from "./gfx/clouds.js";
-import { islandGeometry, terrainMaterial } from "./gfx/terrain.js";
-import { buildGrass } from "./gfx/grass.js";
-import { growTree, treeMaterials } from "./gfx/tree.js";
-import { hearthProps, propMaterial, part, KIND } from "./gfx/props.js";
+import { Streamer } from "./gfx/stream.js";
+import { part, KIND, propMaterial } from "./gfx/props.js";
 import { makeRandom } from "./det.js";
 
 /**
@@ -87,37 +85,15 @@ export class World {
         this.seaMat = seaMaterial();
         this.sea = add(new Entity({ name: "cloud-sea", castShadow: false, frustumCulled: false, mesh: new Mesh(seaGeometry(), this.seaMat) }));
         const rand = makeRandom(5150), places = [];
-        for (let k = 0; k < 34; k++) {
-            const a = rand() * Math.PI * 2, r = 110 + rand() * rand() * 1500, low = rand() < 0.45;
-            places.push({ x: 75 + Math.cos(a) * r, y: 15 + Math.sin(a) * r, z: low ? -6 + rand() * 10 : 25 + rand() * 120, size: low ? 18 + rand() * 30 : 10 + rand() * 22 });
+        for (let k = 0; k < 64; k++) {
+            const a = rand() * Math.PI * 2, r = 110 + rand() * 2300, low = rand() < 0.45, hi = rand() * 700;
+            places.push({ x: 900 + Math.cos(a) * r, y: Math.sin(a) * r * 0.6, z: low ? -6 + rand() * 10 : 25 + hi, size: low ? 18 + rand() * 30 : 10 + rand() * 24 });
         }
         add(new Entity({ name: "cumulus", castShadow: false, frustumCulled: false, mesh: new Mesh(cumulusGeometry(5151, places), cumulusMaterial()) }));
 
-        // islands
-        const paths = world.data.paths || [];
-        for (const isl of world.islands) add(new Entity({ name: isl.id, castShadow: false, mesh: new Mesh(islandGeometry(isl, isl === world.islands[0] ? paths : []), terrainMaterial(isl)) }));
-
-        // Hearth Isle's props, the roof, the tree
-        const props = hearthProps(world), pm = propMaterial(false);
-        add(new Entity({ name: "props", mesh: new Mesh(props.mesh, pm) }));
-        for (const g of props.roofs) add(new Entity({ name: "roof", mesh: new Mesh(g, propMaterial(true)) }));
-        this.windmill = props.windmill;
-        const t = world.data.tree;
-        if (t) {
-            const at = { x: t.x, y: t.y, z: topAt(world.islands[0], t.x, t.y), seed: t.seed, height: t.height };
-            const tree = growTree(at), mats = treeMaterials(at);
-            add(new Entity({ name: "bark", mesh: new Mesh(tree.bark, mats.bark) }));
-            add(new Entity({ name: "leaves", mesh: new Mesh(tree.leaves, mats.leaves) }));
-            this.tree = tree;
-        }
-        // standing stones on Daisy Step
-        const stones = [];
-        for (const b of world.boxes) if (b.kind === "stone") stones.push(part(primitives.box(b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0), [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2], "stone"));
-        if (stones.length) add(new Entity({ name: "stones", mesh: new Mesh(Geometry.merge(stones, { uvs: false }), pm) }));
-
-        // grass and flowers
-        this.grass = world.islands.map((isl) => buildGrass(isl, world, this.quality));
-        for (const g of this.grass) for (const e of g.entities) add(e);
+        // the islands: streamed in tiers (gfx/stream.js); far silhouettes for all twenty are built now
+        this.stream = new Streamer(this, world);
+        const pm = this.stream.pm;
 
         // plots and crops: instanced, painted by the prop material (colour alpha = surface kind)
         const ipm = propMaterial(false);
@@ -151,9 +127,6 @@ export class World {
         const h = world.data.hut;
         this.chimney = [h.x - h.w / 2 + 1.35, h.y + h.d / 2 - 1.05, topAt(world.islands[0], h.x, h.y) + h.h + 2.9];
 
-        // island shadows on the cloud sea
-        const u = this.seaMat.values.u_islands;
-        world.islands.slice(0, 8).forEach((isl, i) => u.set([isl.x, isl.y, isl.radius * 0.95, isl.top], i * 4));
 
         this.setShadows(true);
         this.time = 0;
@@ -227,7 +200,10 @@ export class World {
         shared.u_player.set([pose.x, pose.y, pose.z, pose.glide ? 0 : 1]);
         syncShared();
         this.sky.setPosition(eye[0], eye[1], eye[2]);
-        for (const g of this.grass) g.update(eye);
+        this.stream.update(eye);
+        // the cloud sea shows the shadows of the eight islands nearest the camera
+        const u = this.seaMat.values.u_islands, near = this.stream.records.slice().sort((p, q) => p.dist - q.dist);
+        for (let i = 0; i < 8; i++) { const isl = near[i].isl; u[i * 4] = isl.x; u[i * 4 + 1] = isl.y; u[i * 4 + 2] = isl.radius * 0.95; u[i * 4 + 3] = isl.top; }
 
         // the player and the canopy
         const want = pose.glide ? 1 : 0;
@@ -329,7 +305,13 @@ export class World {
 
     /** chimney smoke and the motes of pollen that drift in the afternoon light */
     drawAmbient(dt, eye) {
-        if (this._r() < dt * 3) this.smoke.emit(1, { position: this.chimney, spread: 0.15, velocity: [shared.u_wind[0] * 0.8, shared.u_wind[1] * 0.8, 0.9], speed: 0.15, life: [4, 7], size: [0.35, 1.6], color: [0.92, 0.92, 0.9, 0.4], colorEnd: [0.9, 0.92, 0.95, 0] });
+        // mist where the waterfalls meet the clouds, spray at their lips
+        for (const fall of this.stream.falls) {
+            if (Math.hypot(fall.base[0] - eye[0], fall.base[1] - eye[1]) > 700) continue;
+            if (this._r() < dt * 14) this.smoke.emit(1, { position: fall.base, spread: 6, velocity: [fall.dir[0] * 1.5, fall.dir[1] * 1.5, 2.2], speed: 1.2, life: [3, 6], size: [3, 9], color: [0.95, 0.97, 1.0, 0.45], colorEnd: [0.95, 0.97, 1.0, 0] });
+            if (this._r() < dt * 8) this.splash.emit(2, { position: fall.top, spread: 1.2, velocity: [fall.dir[0] * 2, fall.dir[1] * 2, 0.5], speed: 1, life: [0.5, 1], size: [0.1, 0.03], color: [0.85, 0.92, 1, 0.8] });
+        }
+        if (this.chimneyReady && this.stream.records[0].mid && this._r() < dt * 3) this.smoke.emit(1, { position: this.chimney, spread: 0.15, velocity: [shared.u_wind[0] * 0.8, shared.u_wind[1] * 0.8, 0.9], speed: 0.15, life: [4, 7], size: [0.35, 1.6], color: [0.92, 0.92, 0.9, 0.4], colorEnd: [0.9, 0.92, 0.95, 0] });
         const n = Math.round(dt * 40);
         for (let k = 0; k < n; k++) {
             const a = this._r() * Math.PI * 2, r = 2 + this._r() * 16;

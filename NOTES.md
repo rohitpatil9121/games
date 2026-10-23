@@ -161,3 +161,61 @@ above and the renderer counts):
 
 Average 1.85: not premium yet (needs 2.3, nothing below 2). The environment and light are at the bar; the
 hero, the interactables and the HUD are what hold it down, and they are later stages' work.
+
+## Stage 3: world and streaming
+
+Skills used: `procedural-gen` (one seeded generator, validation before use), `level-design` (routes, sightlines,
+landmarks), `threejs-procedural-fields` (bare-rock field for the High Rocks), `threejs-procedural-vegetation` (apple
+and pine species; growth split into steps), `threejs-water-optics` (analytic ripples, Fresnel sky reflection, bank
+foam; a falling ribbon for the waterfall), `threejs-performance` / `performance-optimization` (tiers, budgets,
+measuring), `threejs-visual-validation` (views 5 and 6 re-pointed and every baseline re-locked).
+
+What was built:
+
+- `tools/make-world.mjs` → `game/world-data.js`: the 20 islands of GDD §5 from a skeleton (band, place, size,
+  landmark), seeded detail (offsets, seeds, hills, depth, trees, a thermal off each island's south rim) and
+  hand-tuned overrides (Hearth Isle and Daisy Step exactly as stage 1; two gate updrafts; 13 wind currents along
+  the routes). 20 thermals, 13 currents, 52 trees.
+- `game/landmarks.js`: every landmark as shape descriptors, one source of truth: the simulation boxes the solid
+  ones (collision, in a 32 m grid), the renderer draws them all (`gfx/landmarks.js`).
+- Ponds and streams are dug into `topAt` (capsules), so walking, grass and water agree.
+- `gfx/stream.js`: three tiers per island (far: always built, a 22% mesh and a coarse landmark; mid within
+  560 m: half mesh, landmark, trees, water, Hearth's buildings; near within 230 m: full mesh, grass, flowers),
+  hysteresis on drop (760 m / 320 m), jobs as generators under a 3 ms/frame budget, GPU buffers freed on drop,
+  shadows only within 160 m.
+- `tools/check-world.mjs` (in `npm test`): overlaps, reachability by the real glide sim per glider tier, and
+  landmark sightlines along the routes.
+
+Measured:
+
+- `npm run perf` (Intel UHD, 1280×720): Low 12.4–13.1 ms, Medium 14.5–16.3 ms, High 15.0–17.2 ms. Medium is inside
+  16.6 ms, with little margin (stage 2 was 10–14 ms; the rest of the world is now in view: 96 draws + 22 shadow
+  draws, up to 540k triangles at the hut door, of which ~460k is grass). The fixes that got it there: mid tier
+  1100 → 560 m, shadows only near (106 → 22 shadow draws), cumulus balls 16×11 → 10×7, grass tiers 28/62 →
+  20/46 m on Medium, leaf masses 9×14 → 7×11, the rock bump only within 90 m.
+- `tools/stream-test.mjs` (a 5.4 km flight over every band at 45 m/s, four times glide speed, real
+  requestAnimationFrame): the first run, before the budget fixes above, gave load to first frame 756 ms, 78 files,
+  767 KB; median frame 13.9 ms, 99th percentile 23.8 ms, worst 62.5 ms, 4 of 9,217 frames over 33 ms; islands'
+  geometry 19–34 MB as tiers come and go, JS heap 46–91 MB with no growth over the flight. Later runs on the same
+  machine were much noisier (load 4–7 s, medians 15–21 ms) while the scene was at its heaviest; the run after the
+  last fixes was not done, so that's the number still to confirm.
+- The longest single build step found was the Crown's 42 m tree (24.6 ms in one step). Tree growth now yields
+  every 6 branches and every 4 leaf masses. A near terrain mesh (~6,000 vertices, fields per vertex) is still one
+  step and can take tens of milliseconds on a busy machine: the next thing to split if hitches show in play.
+- `npm test`: everything passes; the first-loop pilot, the stress run and the real-input playtest are unchanged.
+
+Findings to act on (honest):
+
+- **The glider tiers don't gate anything yet.** Every tier reaches all 20 islands, because climbing in a
+  thermal costs no stamina and the thermals reach high enough to cross each band. Progression must come from the
+  gates (the Meadow and Orchard gate updrafts only rise once their island is restored, stage 5) and from making
+  long climbs cost something (a slow stamina drain even in lift, or stronger sink between islands). Stage 5 will
+  re-run the checker with that rule and tune it until the tiers separate.
+- Islands still read alike in shape (all round loaves over cones); their landmarks and band colours tell them
+  apart. More shape variety (twin rocks, terraces, long ridges) would help the far silhouettes.
+- The Crown's giant tree is one big round crown: it needs its own species before the ending (stage 6).
+- Windmill sails, kites and the bell-tower wheel don't move yet (restoration, stage 5).
+
+Views: 5 is now the Willow Pond waterfall, 6 the High Rocks from below; all twelve baselines re-locked (views 1–4
+changed by 6–26% because the rest of the world now shows behind them). `artifacts/stage3-sheet.jpg` (the six
+views), `artifacts/stage3-tour.jpg` (every island's landmark).

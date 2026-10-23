@@ -44,10 +44,9 @@ Saturated but never neon: the final grade caps saturation and keeps whites warm.
   sea, (3) glide view toward the next island with haze, (4) grass close-up in wind, (5) waterfall off an
   edge into the clouds, (6) the High Rocks from below at golden hour. Each captured at noon, golden hour
   and in rain. The `threejs-aaa-graphics-builder` scorecard is run at stage 2 and at the end; the target is
-  premium (no category below 2, average ≥ 2.3). *(Stage 2: views 5 and 6 stand in as "the cliff edge into
-  the clouds" and "Hearth Isle from below" until the waterfall (Willow Pond) and the High Rocks exist in
-  stage 3, when those two baselines are re-locked. Rain captures come with the rain in stage 7.
-  `npm run views` compares; `npm run views:lock` re-locks.)*
+  premium (no category below 2, average ≥ 2.3). *(Since stage 3 view 5 is the Willow Pond waterfall and view 6 the
+  High Rocks from below. Rain captures come with the rain in stage 7. `npm run views` compares;
+  `npm run views:lock` re-locks.)*
 
 **Honest risk, and what I propose instead.** True raymarched volumetric clouds are too slow for the
 target laptop (Intel UHD class, WebGL, where TIDEFALL's terrain shadows alone were 85% of the frame). So:
@@ -223,9 +222,10 @@ The world is generated from a fixed seed, then hand-tuned; the result is stored 
   storms never come before day 4.
 - **Secrets:** Hollow Log (below the Meadow), Pear Hollow's chapel crypt, a cave behind the Willow Pond
   waterfall, a sixth sprite kind, three lost journals.
-- **Streaming and LOD:** full detail within ~250 m, a low-detail mesh to ~900 m, an impostor (a
-  pre-rendered card lit by the current sun) beyond, all fading into haze. Island meshes are built
-  in small slices so no frame loses more than ~4 ms; hitches are measured.
+- **Streaming and LOD:** full detail (grass) within 230 m, a half-detail mesh with landmark, trees and water
+  to 560 m, a low-detail silhouette beyond, all fading into haze. *(Built: low-detail meshes rather than
+  pre-rendered impostor cards; at 20 islands the meshes are cheaper than keeping cards lit to the moving
+  sun.)* Builds run in steps under 3 ms a frame; hitches are measured (`tools/stream-test.mjs`).
 - **Check tool:** `tools/check-world.mjs`: no overlapping islands; every island reachable from home by
   glider with each upgrade tier (simulating glides through the real air field); each next landmark visible
   (line of sight, ≥ 1° tall) from the island before it; bridge spans 25–140 m with valid anchors; every

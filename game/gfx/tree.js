@@ -15,6 +15,9 @@ import { makeRandom } from "../det.js";
  * rounded leaf masses, deep and cool inside, bright and yellow-green where the sun hits the top. A mass is a
  * lumpy sphere (the body of the crown) with leaf cards scattered on it to break its silhouette into leaves.
  * Bark texture is measured in world units around the branch, so it doesn't stretch on thin branches.
+ *
+ * Every vertex carries its own sway data (colour r: height above the root as a fraction of the tree, g: a phase),
+ * so all the trees of an island merge into one bark mesh and one leaf mesh and still sway separately.
  * @module game/gfx/tree
  */
 
@@ -35,6 +38,18 @@ export const OAK = Object.freeze({
     leafLight: [0.55, 0.76, 0.3],
 });
 
+/** the Orchard band's apple tree: shorter, rounder, more branches, fruit on the masses */
+export const APPLE = Object.freeze({
+    ...OAK,
+    levels: [
+        { length: 0.36, radius: 0.5, taper: 0.6, children: 5, emerge: [0.5, 0.98], angle: 0.95, gnarl: 0.14, up: 0.05, sections: 7, radial: 10 },
+        { length: 0.6, radius: 0.55, taper: 0.35, children: 3, emerge: [0.3, 1.0], angle: 0.7, gnarl: 0.2, up: 0.1, sections: 5, radial: 7 },
+        { length: 0.5, radius: 0.6, taper: 0.25, children: 0, emerge: [0, 0], angle: 0.5, gnarl: 0.25, up: 0.14, sections: 3, radial: 5 },
+    ],
+    roots: 4, mass: [1.1, 1.8], massRef: 9, cards: 34, fruit: 5,
+    leafDark: [0.2, 0.38, 0.16], leafLight: [0.6, 0.78, 0.32],
+});
+
 const norm = (v) => { const m = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / m, v[1] / m, v[2] / m]; };
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
@@ -50,6 +65,17 @@ function rotate(v, k, a) {
  * @param {{ x: number, y: number, z: number, seed: number, height: number }} at
  */
 export function growTree(at, species = OAK) {
+    const it = growTreeSteps(at, species);
+    let r;
+    for (r = it.next(); !r.done; r = it.next());
+    return r.value;
+}
+
+/**
+ * The same as growTree, as a generator for streaming (gfx/stream.js): it yields every few branches and every few
+ * leaf masses, so even the Crown's giant tree is built across frames.
+ */
+export function* growTreeSteps(at, species = OAK) {
     const rand = makeRandom(at.seed * 7919 + 1);
     const bark = { pos: [], nrm: [], uv: [], col: [], idx: [] };
     const masses = [];
@@ -58,6 +84,7 @@ export function growTree(at, species = OAK) {
     while (queue.length) {
         const b = queue.shift(), L = species.levels[b.level];
         branches++;
+        if (branches % 6 === 0) yield;
         // the branch's path: sections, each turning by noise + tropism
         const pts = [b.origin], dirs = [b.dir];
         let dir = b.dir, p = b.origin;
@@ -86,7 +113,8 @@ export function growTree(at, species = OAK) {
         }
         // leaf masses at the tips of the last two levels
         if (b.level >= species.levels.length - 2 && (b.level === species.levels.length - 1 || rand() < 0.4)) {
-            const r = species.mass[0] + (species.mass[1] - species.mass[0]) * rand();
+            // leaf masses scale with the tree (the species' sizes are for a 15 m oak)
+            const r = (species.mass[0] + (species.mass[1] - species.mass[0]) * rand()) * Math.max(0.7, at.height / (species.massRef || 15));
             masses.push({ x: p[0], y: p[1], z: p[2] + r * 0.3, r });
         }
     }
@@ -102,9 +130,46 @@ export function growTree(at, species = OAK) {
     for (const m of masses) { cx += m.x; cy += m.y; cz += m.z; }
     cx /= masses.length; cy /= masses.length; cz /= masses.length;
     const crownR = Math.max(...masses.map((m) => Math.hypot(m.x - cx, m.y - cy, m.z - cz) + m.r));
-    const leaves = emitLeaves(masses, [cx, cy, cz], crownR, species, rand);
+    const leaves = yield* emitLeaves(masses, [cx, cy, cz], crownR, species, rand);
+    // fruit: small red balls tucked into the sunny side of each mass
+    const fruit = [];
+    if (species.fruit) for (const m of masses) for (let k = 0; k < species.fruit; k++) {
+        const a = rand() * Math.PI * 2, u = rand() * 0.8 - 0.1, s = Math.sqrt(1 - u * u);
+        fruit.push([m.x + Math.cos(a) * s * m.r * 0.95, m.y + Math.sin(a) * s * m.r * 0.95, m.z + u * m.r * 0.9]);
+    }
     const barkGeo = new Geometry({ name: "bark", positions: new Float32Array(bark.pos), normals: new Float32Array(bark.nrm), uvs: new Float32Array(bark.uv), colors: new Float32Array(bark.col), indices: new Uint32Array(bark.idx) });
-    return { bark: barkGeo, leaves, masses, branches, crown: { x: cx, y: cy, z: cz, r: crownR } };
+    swayData(barkGeo, at); swayData(leaves, at);
+    return { bark: barkGeo, leaves, masses, branches, fruit, crown: { x: cx, y: cy, z: cz, r: crownR } };
+}
+
+/**
+ * The High Rocks' wind-bent pine: a straight trunk and tiers of flattened leaf masses, smaller toward the top
+ * (the same masses and cards as the oak, squashed into a Ghibli pine's layered silhouette).
+ */
+export function growPine(at) {
+    const rand = makeRandom(at.seed * 104729 + 3), bark = { pos: [], nrm: [], uv: [], col: [], idx: [] };
+    const h = at.height, pts = [], dirs = [];
+    const lean = [(rand() - 0.5) * 0.12, (rand() - 0.5) * 0.12];
+    for (let s = 0; s <= 6; s++) { const t = s / 6; pts.push([at.x + lean[0] * h * t * t, at.y + lean[1] * h * t * t, at.z - 0.3 + h * t]); dirs.push(norm([lean[0] * 2 * t, lean[1] * 2 * t, 1])); }
+    emitTube(bark, pts, dirs, (t) => 0.34 * (h / 9) * (1 - 0.8 * t), 8, 0.3);
+    const masses = [], tiers = 4 + Math.floor(rand() * 2);
+    for (let k = 0; k < tiers; k++) {
+        const t = 0.32 + (0.62 * k) / (tiers - 1), r = h * 0.3 * (1 - (0.62 * k) / tiers) * (0.85 + rand() * 0.3);
+        masses.push({ x: at.x + lean[0] * h * t * t + (rand() - 0.5) * 0.4, y: at.y + lean[1] * h * t * t + (rand() - 0.5) * 0.4, z: at.z + h * t, r, squash: 0.42 });
+    }
+    let leaves, lr;
+    const li = emitLeaves(masses, [at.x, at.y, at.z + h * 0.6], h * 0.55, { ...OAK, cards: 26 }, rand);
+    for (lr = li.next(); !lr.done; lr = li.next());
+    leaves = lr.value;
+    const barkGeo = new Geometry({ name: "bark", positions: new Float32Array(bark.pos), normals: new Float32Array(bark.nrm), uvs: new Float32Array(bark.uv), colors: new Float32Array(bark.col), indices: new Uint32Array(bark.idx) });
+    swayData(barkGeo, at); swayData(leaves, at);
+    return { bark: barkGeo, leaves, masses, branches: 1, fruit: [], crown: { x: at.x, y: at.y, z: at.z + h * 0.6, r: h * 0.55 } };
+}
+
+/** colour r = height above the root / tree height, g = a phase from the tree's seed (see the module note) */
+function swayData(g, at) {
+    const P = g.positions, C = g.colors, phase = (at.seed % 97) / 97;
+    for (let i = 0; i < P.length / 3; i++) { C[i * 4] = Math.max(0, (P[i * 3 + 2] - at.z) / at.height); C[i * 4 + 1] = phase; }
 }
 
 /** rings along a path, the frame carried by parallel transport; uv.x around in metres, uv.y along in metres */
@@ -138,17 +203,19 @@ function emitTube(out, pts, dirs, radiusAt, radial, flare) {
 }
 
 /** leaf masses (lumpy spheres) and leaf cards on them; colour alpha = how deep inside the crown (0 out, 1 in) */
-function emitLeaves(masses, crown, crownR, sp, rand) {
+function* emitLeaves(masses, crown, crownR, sp, rand) {
     const pos = [], nrm = [], uv = [], col = [], idx = [];
-    const LAT = 9, LON = 14;
+    const LAT = 7, LON = 11;
+    let done = 0;
     for (const m of masses) {
+        if (++done % 4 === 0) yield;
         // the lumpy body
         const base = pos.length / 3;
         for (let j = 0; j <= LAT; j++) for (let i = 0; i <= LON; i++) {
             const th = (j / LAT) * Math.PI, ph = (i / LON) * Math.PI * 2;
             const nx = Math.sin(th) * Math.cos(ph), ny = Math.sin(th) * Math.sin(ph), nz = Math.cos(th);
             const lump = 1 + 0.16 * Math.sin(nx * 5 + m.x) * Math.sin(ny * 5 + m.y) * Math.sin(nz * 4 + m.z);
-            const flat = nz < -0.3 ? 0.75 : 1;
+            const flat = (nz < -0.3 ? 0.75 : 1) * (m.squash || 1);
             const x = m.x + nx * m.r * lump, y = m.y + ny * m.r * lump, z = m.z + nz * m.r * lump * flat;
             pos.push(x, y, z);
             const v = norm([(x - crown[0]) / crownR * 0.7 + nx * 0.5, (y - crown[1]) / crownR * 0.7 + ny * 0.5, (z - crown[2]) / crownR * 0.7 + nz * 0.5]);
@@ -190,21 +257,17 @@ ${vertexHeader(true)}
 attribute vec3 a_position;
 attribute vec3 a_normal;
 attribute vec2 a_uv;
+attribute vec4 a_color;
 uniform mat4 u_model;
 uniform float u_time;
-uniform vec4 u_tree;     // root x, y, z, height
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec2 v_uv;
-/** whole-tree sway: grows with height above the root, follows the wind's gusts slowly */
-vec3 sway(vec3 p) {
-    float h = max(0.0, p.z - u_tree.z) / u_tree.w;
-    float w = windAt(u_tree.xy, u_time * 0.35) * 0.35;
-    return vec3(u_wind.xy * w * h * h * 0.6, 0.0);
-}
 void main() {
     vec3 w = (u_model * vec4(a_position, 1.0)).xyz;
-    w += sway(w);
+    // whole-tree sway: grows with height above the root, follows the wind's gusts slowly
+    float h = a_color.r;
+    w.xy += u_wind.xy * windAt(w.xy * 0.02, u_time * 0.35 + a_color.g * 6.0) * 0.35 * h * h * 0.6 * 3.0;
     v_world = w;
     v_normal = mat3(u_model) * a_normal;
     v_uv = a_uv;
@@ -237,16 +300,14 @@ attribute vec2 a_uv;
 attribute vec4 a_color;
 uniform mat4 u_model;
 uniform float u_time;
-uniform vec4 u_tree;
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec2 v_uv;
 varying float v_depth;
 void main() {
     vec3 w = (u_model * vec4(a_position, 1.0)).xyz;
-    float h = max(0.0, w.z - u_tree.z) / u_tree.w;
-    float gust = windAt(u_tree.xy, u_time * 0.35) * 0.35;
-    w.xy += u_wind.xy * gust * h * h * 0.6;
+    float h = a_color.r;
+    w.xy += u_wind.xy * windAt(w.xy * 0.02, u_time * 0.35 + a_color.g * 6.0) * 0.35 * h * h * 0.6 * 3.0;
     // cards flutter about their root (uv.y = 0 stays put)
     if (a_uv.y >= 0.0) {
         float f = windAt(w.xy * 3.0, u_time * 2.3) - 0.5;
@@ -292,10 +353,10 @@ void main() {
 }
 `;
 
-export function treeMaterials(at) {
-    const tree = new Float32Array([at.x, at.y, at.z, at.height]);
+/** Bark and leaf materials for a kind of tree (shared by every tree of that kind). */
+export function treeMaterials(species = OAK) {
     return {
-        bark: track(new ShaderMaterial({ name: "bark", vertex: barkVertex, fragment: barkFragment, uniforms: withShared({ u_tree: tree, u_bark: Float32Array.from(OAK.bark) }) })),
-        leaves: track(new ShaderMaterial({ name: "leaves", vertex: leafVertex, fragment: leafFragment, uniforms: withShared({ u_tree: tree, u_leafDark: Float32Array.from(OAK.leafDark), u_leafLight: Float32Array.from(OAK.leafLight) }), cull: "none" })),
+        bark: track(new ShaderMaterial({ name: "bark", vertex: barkVertex, fragment: barkFragment, uniforms: withShared({ u_bark: Float32Array.from(species.bark) }) })),
+        leaves: track(new ShaderMaterial({ name: "leaves", vertex: leafVertex, fragment: leafFragment, uniforms: withShared({ u_leafDark: Float32Array.from(species.leafDark), u_leafLight: Float32Array.from(species.leafLight) }), cull: "none" })),
     };
 }
