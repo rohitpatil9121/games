@@ -14,6 +14,8 @@ export const DT = 1 / TICK_RATE;
 /** Input button bits, as sent on the wire. */
 export const BTN = Object.freeze({
     flap: 1,
+    /** Ring Run: start the set again from the launch spot */
+    restart: 2,
 });
 
 /** Things every fold shares. */
@@ -81,3 +83,15 @@ export const AIR = Object.freeze({
     /** behind a fan the air churns this many times harder */
     fanChurn: 3,
 });
+
+/** A room: who fits, and the modes it can run. */
+export const MATCH = Object.freeze({
+    maxPlayers: 8,
+    modes: Object.freeze(["rings", "tag", "spread"]),
+    /** results stay up this long before the next round */
+    intermission: 12,
+});
+
+/** Lag compensation (stage 4, tags): positions remembered for HISTORY ticks, a tag reaches back at most MAX_REWIND (200 ms). */
+export const HISTORY = 32;
+export const MAX_REWIND = 12;

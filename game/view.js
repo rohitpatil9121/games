@@ -167,6 +167,9 @@ export class GreyboxView {
         }
     }
 
+    /** A new round brings a new seed (the gust timing). */
+    setSeed(seed) { this.seed = seed >>> 0; }
+
     /** seconds until the next gust (negative while one blows), for captions and tips */
     gustIn(t) { return this.gust ? gustIn(this.gust, this.seed, t) : Infinity; }
 }

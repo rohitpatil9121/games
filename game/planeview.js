@@ -70,7 +70,8 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 export class PlaneView {
     /**
      * @param {import("../engine/Scene.js").Scene} scene
-     * @param {{ color?: number[], effects: import("../engine/ParticleSystem.js").ParticleSystem }} opts
+     * @param {{ color?: number[], effects: import("../engine/ParticleSystem.js").ParticleSystem, remote?: boolean }} opts
+     *        remote: another player's plane, placed every frame from interpolated snapshots (not every tick)
      */
     constructor(scene, opts) {
         this.scene = scene;
@@ -79,6 +80,7 @@ export class PlaneView {
         writeGeometry(this.geometry, 0.006, 0.006);
         this.material = new StandardMaterial({ color: opts.color || [0.97, 0.96, 0.92], cull: "none", rim: [0.25, 0.25, 0.25] });
         this.root = scene.add(new Entity({ name: "plane" }));
+        this.root.interpolate = !opts.remote;
         this.body = new Entity({ mesh: new Mesh(this.geometry, this.material) });
         this.ball = new Entity({ mesh: new Mesh(ballGeometry(), this.material), visible: false });
         this.root.add(this.body); this.root.add(this.ball);
@@ -98,8 +100,8 @@ export class PlaneView {
     step(p, fold) {
         this.root.setPosition(p.x, p.y, p.z);
         if (p.crumpled > 0) {
-            // the ball tumbles as it falls: spin from the fall time, not from frame to frame
-            const a = (p.crumpled / 60) * 7;
+            // the ball tumbles as it falls: spin from the time since the crumple, not from frame to frame
+            const a = (this.time - this.crumpleAt) * 7;
             quat.setAxisAngle(this.root.rotation, [Math.sin(a * 0.7), Math.cos(a * 0.5), 0.4], a);
         } else planeRotation(this.root.rotation, p.yaw, p.pitch, p.roll);
         const back = [-Math.cos(p.yaw) * 0.05, -Math.sin(p.yaw) * 0.05];
@@ -126,6 +128,12 @@ export class PlaneView {
         }
         if (p.crumpled === 0) this.trail.push(p.x - back[0] * 0.8, p.y - back[1] * 0.8, p.z);
         this.state = p; this.foldInfo = fold;
+    }
+
+    /** Take the plane out of the scene. */
+    dispose() {
+        this.scene.remove(this.root);
+        this.scene.remove(this.trail);
     }
 
     /**

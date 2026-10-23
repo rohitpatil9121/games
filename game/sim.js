@@ -1,4 +1,5 @@
-import { FLIGHT, FOLDS, DT, TICK_RATE, BTN } from "./data.js";
+import { FLIGHT, FOLDS, DT, TICK_RATE, BTN, HISTORY } from "./data.js";
+import { RingRun } from "./rings.js";
 import { dsin, dcos, datan2, clamp, PI, TAU } from "./det.js";
 import { sample, makeAir } from "./air.js";
 
@@ -300,4 +301,132 @@ export function steerToward(p, yaw, pitch) {
     while (ey < -PI) ey += TAU;
     const roll = clamp(-ey * 2.4, -1, 1), up = clamp((pitch - p.pitch) * 3.2, -1, 1);
     return { pitch: Math.round(up * 127), roll: Math.round(roll * 127) };
+}
+
+// ------------------------------------------------------------------ the match: every plane in a room
+
+/**
+ * A match: the room it's in, the seed (gust timing), the server tick, every player's plane, and this
+ * tick's events. The Room (server/room.mjs) owns one and steps it; Practice runs the same Room in the page.
+ * @param {object} room a room file (game/rooms)
+ * @param {number} seed
+ * @param {{ mode?: string, set?: number }} [options] mode "rings" (Ring Run, set `set`); tag modes come in stage 4
+ */
+export function createState(room, seed, options = {}) {
+    return { room, seed: seed >>> 0, tick: 0, mode: options.mode || "rings", set: options.set || 0, phase: "play", overTicks: 0, players: [], events: [] };
+}
+
+/**
+ * Add a player's plane at a launch spot (spread out: the spot the fewest planes are near).
+ * @param {{ fold?: string, bot?: number }} [options]
+ */
+export function addPlayer(state, id, name, options = {}) {
+    const fold = FOLDS[options.fold] ? options.fold : "glider";
+    const p = createPlane(id, fold, freeLaunch(state));
+    p.name = name; p.bot = options.bot || 0; p.seq = 0;
+    p.clock = state.tick;
+    /** where this plane was, for each of the last HISTORY ticks (lag-compensated tags) */
+    p.hist = new Float64Array(HISTORY * 3);
+    p.run = state.mode === "rings" ? new RingRun(state.room.rings[state.set]) : null;
+    /** best Ring Run time this visit, in ticks (0 = none) */
+    p.best = 0;
+    state.players.push(p);
+    return p;
+}
+
+export function removePlayer(state, id) {
+    const i = state.players.findIndex((p) => p.id === id);
+    if (i >= 0) state.players.splice(i, 1);
+}
+
+export function findPlayer(state, id) {
+    for (const p of state.players) if (p.id === id) return p;
+    return null;
+}
+
+/** the launch spot with the most room: farthest from its nearest plane */
+function freeLaunch(state) {
+    let best = state.room.launches[0], score = -1;
+    for (const l of state.room.launches) {
+        let near = Infinity;
+        for (const p of state.players) near = Math.min(near, (p.x - l.at[0]) ** 2 + (p.y - l.at[1]) ** 2 + (p.z - l.at[2]) ** 2);
+        if (near > score) { score = near; best = l; }
+    }
+    return best;
+}
+
+/** Change a player's fold: it refolds at a launch spot (folding takes a moment, so it can't be a dodge). */
+export function setFold(state, p, fold) {
+    if (!FOLDS[fold] || fold === p.fold) return;
+    p.fold = fold;
+    placeAt(p, nearestLaunch(state.room, p.x, p.y, p.z));
+    p.crumpled = 0; p.guard = Math.round(FLIGHT.refoldGuard * TICK_RATE);
+    if (p.run) p.run = new RingRun(p.run.set);
+    state.events.push({ type: "refold", id: p.id });
+}
+
+const idleInput = { seq: 0, pitch: 0, roll: 0, buttons: 0, lag: 0 };
+
+/**
+ * One server tick. `inputs` maps a player id to the inputs that arrived for it (an array, possibly empty
+ * after a stall, possibly several after one): each is applied in order, one tick of that plane's own clock
+ * each. A plane with no entry at all (a bot without a brain) flies on hands-off.
+ * @param {Map<number, object | object[]>} inputs
+ */
+export function step(state, inputs) {
+    state.events.length = 0;
+    state.tick++;
+    if (state.phase === "over") { if (state.overTicks > 0) state.overTicks--; return; }
+    const n = state.players.length, first = n ? state.tick % n : 0;
+    for (let k = 0; k < n; k++) {
+        const p = state.players[(first + k) % n];
+        const given = inputs.get(p.id);
+        // a plane whose clock fell far behind (a long stall) is brought up to the present
+        if (p.clock < state.tick - 60) p.clock = state.tick - 60;
+        // an empty list means its inputs are late: the plane waits for them (its clock with it), and catches
+        // up when they come, so the client's prediction is exactly what happens
+        if (Array.isArray(given)) for (let i = 0; i < given.length; i++) applyInput(state, p, given[i]);
+        else if (given) applyInput(state, p, given);
+        else { idleInput.seq = p.seq; p.clock = state.tick - 1; applyInput(state, p, idleInput); }
+    }
+    const slot = (state.tick & (HISTORY - 1)) * 3;
+    for (const p of state.players) { p.hist[slot] = p.x; p.hist[slot + 1] = p.y; p.hist[slot + 2] = p.z; }
+}
+
+/**
+ * One input for one plane: the flight step, then the mode's rules. The client runs this same function to
+ * predict its own plane, so everything it reads must be in the snapshot of that plane.
+ */
+export function applyInput(state, p, input) {
+    p.seq = input.seq;
+    const ax = p.x, ay = p.y, az = p.z;
+    if (p.run && (input.buttons & BTN.restart) && !(p.held & BTN.restart)) {
+        placeAt(p, state.room.launches[0]);
+        p.crumpled = 0; p.guard = 0;
+        p.run = new RingRun(p.run.set);
+        p.held = input.buttons;
+        p.clock++;
+        p.events.length = 0; p.events.push("restart");
+        pushEvents(state, p);
+        return;
+    }
+    stepPlane(p, input, state.room, state.seed);
+    if (p.run && p.crumpled === 0 && !p.events.includes("refold")) {
+        const before = p.run.next, r = p.run.step(ax, ay, az, p.x, p.y, p.z);
+        if (r) {
+            p.events.push(r === "done" ? "done" : "ring");
+            p.ringPassed = before;
+            if (r === "done" && (!p.best || p.run.ticks < p.best)) p.best = p.run.ticks;
+        }
+    }
+    pushEvents(state, p);
+}
+
+/** a plane's events, as match events (for the snapshot: effects and sounds for everyone) */
+function pushEvents(state, p) {
+    for (const e of p.events) {
+        if (e === "crumple" || e === "glance") state.events.push({ type: e, id: p.id, x: p.hit.x, y: p.hit.y, z: p.hit.z });
+        else if (e === "ring" || e === "done") state.events.push({ type: e, id: p.id, ring: p.ringPassed, ticks: p.run.ticks });
+        else if (e === "flap" || e === "refold" || e === "stall" || e === "restart") state.events.push({ type: e, id: p.id });
+    }
 }

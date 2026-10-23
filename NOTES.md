@@ -136,3 +136,55 @@ Not done or not checked:
 - Ring Run best times are kept only for the page's life; saving comes with the settings (stage 7).
 - Touch and tilt are stage 8. The gamepad path is written but untested (no pad here).
 - Feel is still for a human to judge: the flap snap, the lean, the gust's strength.
+
+## Stage 3: TIDEFALL's net skeleton
+
+Copied and adapted, not rewritten: `server/server.mjs` (static files + `ws` on one port, 4-letter rooms,
+quick play, per-address limits, the 60 Hz clock; port 8160 beside BREACH's 8140 and TIDEFALL's 8150),
+`server/room.mjs` (input queue with time credit, lag in ticks from the reported view tick, bot fill,
+rate limits, per-client delta snapshots), `game/net.js` (Loopback, SocketTransport, Conditions, Client
+with prediction, reconciliation and interpolation), `game/protocol.js` (binary `in` and `snap`, JSON for
+the rest), `tools/net-test.mjs`. `ws` 8.22.0 was copied from TIDEFALL's node_modules, not downloaded.
+
+What changed for planes:
+- `sim.js` grew the match: `createState`, `addPlayer` (at the launch spot farthest from other planes),
+  `step`, `applyInput` (the flight step, then the mode: Ring Run per player, with a restart button), and
+  `setFold` (changing fold refolds you at a launch spot, so it can't be used as a dodge).
+- The air needs no bandwidth (as TIDEFALL's tide): `welcome`/`start` carry the room id and seed; every
+  plane has its own clock, one tick per input applied, and flies through the air of that tick.
+- Snapshots carry your own plane in full (doubles for everything prediction reads) and each other plane
+  as 15 bytes: millimetres, heading in 16 bits, pitch, bank, flags (crumpled, stalled, guarded; it and ink
+  for stage 4), fold. Score rows carry Ring Run progress and best times. Events: flap, stall, glance and
+  crumple (with where), refold, ring, done, restart.
+- Remote planes are drawn by the same `PlaneView` as yours, placed every frame from interpolated
+  snapshots, their effects driven by the snapshot's events; a refold doesn't draw the plane flying across
+  the room. Names float over them; a list of planes and their ring progress sits top right.
+- A bug found on the way: my `step` flew a plane hands-off on any tick with no input, including ticks
+  where its inputs were merely late. The client never predicts those ticks, so prediction drifted up to
+  2 m at 60 ms of ping. TIDEFALL's rule, restored: late means the plane waits for its inputs (its clock
+  with it); only a plane with no input stream at all (a bot without a brain) flies hands-off.
+- Another: the bot fill counted a joining player twice, so a room asked for 3 planes held 2.
+
+Measured (`npm run test:net`, all pass):
+
+| Link | Prediction, worst over 20 s of flying (fan, thermal, gusts, 3–4 crumples) | Interpolated steps of a circling plane |
+|---|---|---|
+| 0 ms | 0.000000 m | 0 frozen, 0 jumps in 270 frames |
+| 60 ms ±10 | 0.000000 m (up to 5 inputs replayed) | |
+| 150 ms ±30 | 0.000000 m (13 replayed) | 0 frozen, 0 jumps |
+| 150 ms ±30, 3% loss | 0.000000 m (30 replayed) | 11 frozen, 0 jumps (5% loss) |
+| 300 ms ±60, 5% loss | 0.0003 m, one correction | |
+
+The one correction on the worst link happens near the start; I think it is the rule that brings a plane
+whose inputs stopped for over a second up to the present, but I haven't proved it. Traffic for one person
+in a room of 8 planes: 4.1 kB/s down, 0.7 kB/s up (15.2 kB/s down as JSON). The real server over Node's
+own WebSocket: two clients share a room and seed, see each other's planes, ping measured, a bad hello and
+a wrong code are refused with a reason.
+
+In the browser: the server runs from the `paper-planes` launch entry (`npm start`). Tab A created room
+TABH, tab B joined it by code; both lists show Alpha (dart) and Bravo (glider), and Bravo's screen draws
+Alpha's plane with its name and trail where the server has it. A static server (`npm run static`) answers
+404 on /status, so the page offers Practice only. No console or server errors.
+Not verified in the browser: smooth real-time motion with two tabs. The Browser pane is throttled to about
+7 fps here, so frame-driven checks can't run in real time; the netcode numbers above come from the
+virtual-clock harness and the real-socket test instead.

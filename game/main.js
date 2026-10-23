@@ -1,23 +1,27 @@
 import { Game, PostFX } from "../engine/index.js";
-import { FOLDS, FOLD_IDS, DT } from "./data.js";
-import { createPlane, stepPlane } from "./sim.js";
-import { RingRun } from "./rings.js";
-import { bedroom } from "./rooms/bedroom.js";
+import { FOLDS, FOLD_IDS, DT, MATCH } from "./data.js";
+import { Client, Loopback, SocketTransport, Conditions } from "./net.js";
+import { PROTOCOL, NAME_MAX, FLAG, cleanText } from "./protocol.js";
+import { ROOMS } from "./rooms/index.js";
 import { GreyboxView } from "./view.js";
 import { PlaneView } from "./planeview.js";
 import { RollCamera, ChaseCamera } from "./camera.js";
 import { Controls, defaultBindings, keyHint } from "./controls.js";
+import { Room } from "../server/room.mjs";
+import { brains } from "./bots.js";
 
 /**
- * PAPER PLANES, stage 2: flight feel and Ring Run in the greybox bedroom.
- *
- * The page opens straight into Ring Run's first set (the tutorial: thermal, fan, stall). This file is still
- * the stage-2 shell: stage 3 replaces it with the real application around the Room and the Client, and
- * keeps the controls, camera, plane view and rings.
+ * PAPER PLANES: the application. Screens, the camera, and the wiring between the parts. The match lives in
+ * sim.js, the room that runs it in server/room.mjs (the same class here for Practice and on the server),
+ * the network in net.js (TIDEFALL's), the room's look in view.js and each plane's in planeview.js.
+ * Structure follows TIDEFALL's main.js. Stage 3: Ring Run online and in Practice; tag comes in stage 4,
+ * the settings screen, saving and the notebook menus in stage 7.
  * @module game/main
  */
 
 const $ = (id) => document.getElementById(id);
+
+// ------------------------------------------------------------------ engine
 const canvas = $("view");
 const camera = new RollCamera({ mode: "orbit", fov: 70, near: 0.02, far: 40 });
 const game = new Game({ canvas, quality: "high", antialias: true, camera });
@@ -25,141 +29,313 @@ if (game.failed) throw new Error("WebGL unavailable");
 game.renderer.postfx = new PostFX(game.renderer, { bloom: { threshold: 1.2, intensity: 0.35 }, vignette: 0.25, contrast: 1.05, saturation: 1.05, exposure: 1.0 });
 
 const settings = { sensitivity: 1, invertPitch: false, bindings: defaultBindings(), lean: 1, fovKick: true, horizonLock: false, reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches };
-const room = bedroom;
-const seed = 1234;
-const view = new GreyboxView(game, room, seed);
-const chase = new ChaseCamera(camera, room);
-const controls = new Controls(game.input, canvas, settings);
-controls.active = true;
-const planeView = new PlaneView(game.scene, { effects: view.effects });
 game.juice.reducedMotion = settings.reducedMotion;
+const client = new Client();
+const controls = new Controls(game.input, canvas, settings);
+/** @type {GreyboxView | null} */
+let view = null, viewRoom = "";
+/** @type {ChaseCamera | null} */
+let chase = null;
+/** my plane's look, and every other plane's: id → { view, proxy, events } */
+let mine = null;
+const others = new Map();
+const TINTS = [[0.98, 0.9, 0.86], [0.86, 0.93, 0.98], [0.9, 0.97, 0.86], [0.98, 0.95, 0.82], [0.93, 0.88, 0.98], [0.86, 0.97, 0.95], [0.98, 0.88, 0.93], [0.92, 0.92, 0.92]];
 
-let fold = "glider", setIndex = 0;
-let plane, run, tick = 0, best = {};
-const stats = { crumples: 0, flaps: 0, stalls: 0, stallTips: 0 };
+// ------------------------------------------------------------------ screens
+let screen = "title";
+function show(name) {
+    screen = name;
+    $("title").hidden = name !== "title";
+    $("pause").hidden = name !== "pause";
+    $("hud").hidden = name === "title";
+    controls.active = name === "play";
+    if (name !== "play") for (const code of [...game.input.down]) game.input.release(code);
+    if (name === "title") $("practice").focus();
+    else if (name === "pause") $("resume").focus();
+}
+function lockMouse() {
+    if (controls.coarse) return;
+    try { const a = canvas.requestPointerLock(); if (a && a.catch) a.catch(() => {}); } catch { /* not available */ }
+}
+function resume() { show("play"); lockMouse(); canvas.focus(); }
 
-function restart() {
-    const set = room.rings[setIndex];
-    // launch from the spot nearest the first ring, facing it
-    plane = createPlane(0, fold, room.launches[0]);
-    run = new RingRun(set);
+/** latency, jitter and loss added to the link on purpose, from the pause menu */
+const conditions = { latency: 0, jitter: 0, loss: 0 };
+/** @type {Room | null} the room this page runs itself (Practice) */
+let room = null;
+
+function startPractice() {
+    leave();
+    room = new Room({ code: "PRACTICE", mode: "rings", set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, seed: (Date.now() & 0xffffff) + 1, brains });
+    const link = new Conditions(new Loopback(room), conditions);
+    link.settings = conditions;
+    client.attach(link);
+    link.connect(playerName(), $("fold").value);
+    resume();
+}
+
+// ------------------------------------------------------------------ online (as TIDEFALL)
+function serverUrl() {
+    const named = new URLSearchParams(location.search).get("server");
+    if (named) return named.endsWith("/ws") ? named : named.replace(/[/]$/, "") + "/ws";
+    if (!location.host) return "";
+    return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+}
+const online = { url: serverUrl(), up: false, last: null };
+
+async function probe() {
+    const status = $("server-status"), buttons = [$("quick"), $("create"), $("join")];
+    let info = null;
+    try {
+        if (!online.url) throw new Error("no server");
+        const reply = await fetch(online.url.replace(/^ws/, "http").replace(/[/]ws$/, "/status"), { cache: "no-store" });
+        info = await reply.json();
+        if (info.game !== "paper-planes") throw new Error("not a PAPER PLANES server");
+    } catch { info = null; }
+    online.up = !!info;
+    for (const b of buttons) b.disabled = !online.up;
+    if (!info) status.textContent = "No server here. Practice works without one.";
+    else if (info.protocol !== PROTOCOL) { status.textContent = "The server is a different version from this page. Reload."; for (const b of buttons) b.disabled = true; }
+    else status.textContent = `Server is up: ${info.players} flying in ${info.rooms} ${info.rooms === 1 ? "room" : "rooms"}.`;
+}
+
+function playOnline(hello) {
+    leave();
+    online.last = hello;
+    const link = new Conditions(new SocketTransport(online.url), conditions);
+    link.settings = conditions;
+    client.attach(link);
+    link.onopen = () => client.send({ t: "hello", v: PROTOCOL, name: playerName(), fold: $("fold").value, ...hello });
+    link.connect();
+    resume();
+    notice("Connecting…", 20);
+}
+
+function leave() {
+    client.detach(); room = null;
+    for (const o of others.values()) o.view.dispose();
+    others.clear();
+    if (document.pointerLockElement) game.input.unlockPointer();
+}
+function toTitle() { leave(); history.replaceState(null, "", location.pathname + location.search); show("title"); }
+function playerName() { return cleanText($("name").value, NAME_MAX) || "Player"; }
+
+{
+    $("p-bots").replaceChildren(...Array.from({ length: MATCH.maxPlayers }, (_, i) => new Option(i ? `${i + 1} (you + ${i} bots)` : "Just you", String(i))));
+    $("p-set").replaceChildren(...ROOMS.bedroom.rings.map((s, i) => new Option(s.name, String(i))));
+    $("fold").replaceChildren(...FOLD_IDS.map((f) => new Option(FOLDS[f].name, f)));
+    $("fold").value = "glider";
+    $("practice").addEventListener("click", startPractice);
+    $("quick").addEventListener("click", () => playOnline({}));
+    $("create").addEventListener("click", () => playOnline({ create: { mode: "rings", set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, open: true } }));
+    const code = $("code");
+    code.addEventListener("input", () => { code.value = code.value.toUpperCase().replace(/[^A-Z]/g, ""); });
+    $("join-form").addEventListener("submit", (e) => { e.preventDefault(); if (code.value.length === 4 && online.up) playOnline({ room: code.value }); else code.focus(); });
+    const invited = location.hash.replace(/[^A-Za-z]/g, "").toUpperCase().slice(0, 4);
+    if (invited.length === 4) code.value = invited;
+    probe();
+}
+$("resume").addEventListener("click", resume);
+$("leave").addEventListener("click", () => { toTitle(); probe(); });
+$("invite").addEventListener("click", async () => {
+    const link = location.origin + location.pathname + location.search + "#" + client.room.code;
+    try { await navigator.clipboard.writeText(link); $("invite").textContent = "Link copied"; } catch { prompt("Invite link", link); }
+});
+for (const [id, key, unit, scale] of [["net-latency", "latency", " ms", 1], ["net-jitter", "jitter", " ms", 1], ["net-loss", "loss", " %", 0.01]]) {
+    const slider = $(id), out = $(id + "-out");
+    const apply = () => { conditions[key] = +slider.value * scale; out.textContent = slider.value + unit; };
+    slider.addEventListener("input", apply);
+    apply();
+}
+canvas.addEventListener("click", () => { if (screen === "play" && !game.input.pointer.locked) lockMouse(); });
+let lockLost = 0;
+document.addEventListener("pointerlockchange", () => { if (!document.pointerLockElement && screen === "play") { lockLost = performance.now(); show("pause"); } });
+addEventListener("keydown", (e) => {
+    if (e.code === "F3") { e.preventDefault(); $("debug").hidden = !$("debug").hidden; }
+    else if (e.code === "Escape" && performance.now() - lockLost > 400) {
+        if (screen === "play" && !document.pointerLockElement) show("pause");
+        else if (screen === "pause") resume();
+    } else if (screen === "play" && !e.repeat && (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3")) {
+        const fold = FOLD_IDS[Number(e.code.slice(5)) - 1];
+        $("fold").value = fold;
+        client.send({ t: "fold", fold });
+    } else if (screen === "play" && e.code === "KeyF" && view) view.motes.visible = !view.motes.visible;
+    if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code) && screen === "play") e.preventDefault();
+});
+
+// ------------------------------------------------------------------ what the match tells us
+let noticeUntil = 0;
+function notice(text, seconds = 3) { $("notice").textContent = text; noticeUntil = performance.now() + seconds * 1000; }
+
+/** Build the room's scene the first time it's needed (one room so far), and take the round's seed. */
+function setupRoom() {
+    const r = client.room;
+    if (!view || viewRoom !== r.room) {
+        view = new GreyboxView(game, ROOMS[r.room], r.seed);
+        viewRoom = r.room;
+        chase = new ChaseCamera(camera, ROOMS[r.room]);
+        mine = new PlaneView(game.scene, { effects: view.effects });
+    }
+    view.setSeed(r.seed);
+    const set = r.mode === "rings" ? ROOMS[r.room].rings[r.set] : null;
     view.showRings(set);
     view.updateRings(0);
-    controls.resetAim(plane);
-    planeView.trail.clear();
-    planeView.fold = fold;
-    tick = 0;
-    Object.assign(stats, { crumples: 0, flaps: 0, stalls: 0 });
-    $("result").hidden = true;
+    mine.trail.clear();
+    ringsShown = 0;
 }
+let ringsShown = 0;
 
-addEventListener("keydown", (e) => {
-    if (e.repeat) return;
-    if (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3") { fold = FOLD_IDS[Number(e.code.slice(5)) - 1]; restart(); }
-    if (e.code === "KeyN") { setIndex = (setIndex + 1) % room.rings.length; restart(); }
-    if (e.code === "KeyF") view.motes.visible = !view.motes.visible;
-    if (e.code === "KeyH") settings.horizonLock = !settings.horizonLock;
-    if (e.code === "F3") { e.preventDefault(); $("debug").hidden = !$("debug").hidden; }
-    if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
+client.on("welcome", () => {
+    setupRoom();
+    const practice = client.room.code === "PRACTICE";
+    if (!practice) { history.replaceState(null, "", location.pathname + location.search + "#" + client.room.code); $("code").value = client.room.code; }
+    notice(practice ? "Practice" : `Room ${client.room.code}`, 3);
+    $("room-line").hidden = practice;
+    $("room-code").textContent = client.room.code;
+    $("invite").textContent = "Copy invite link";
+    awaitingFirst = true;
 });
-canvas.addEventListener("click", () => { if (document.pointerLockElement !== canvas) game.input.lockPointer(); });
+client.on("start", () => { setupRoom(); notice("A new round", 3); awaitingFirst = true; });
+client.on("close", (reason) => {
+    const was = client.room && client.room.code !== "PRACTICE" ? client.room.code : online.last && online.last.room;
+    toTitle();
+    if (was) $("code").value = was;
+    probe().then(() => { $("server-status").textContent = (reason || "Disconnected.") + (was && online.up ? ` Press Join to go back to room ${was}.` : ""); });
+});
+client.on("roster", () => {
+    for (const [id, o] of others) if (!client.players.has(id) || id === client.id) { o.view.dispose(); others.delete(id); }
+});
+// other planes' events go to their views; mine were already shown when predicted
+client.on("event", (e) => {
+    if (e.id === client.id) { if (e.type === "done") notice(`Set done in ${(e.ticks * DT).toFixed(2)} s`, 4); return; }
+    const o = others.get(e.id);
+    if (o) o.events.push(e);
+});
+let awaitingFirst = false;
 
 // ------------------------------------------------------------------ the fixed step
-const prev = [0, 0, 0], cur = [0, 0, 0];
-let passedFlash = -1;
 game.onUpdate(() => {
-    if (game.input.wasPressed("restart")) restart();
-    const input = controls.gather(plane);
-    prev[0] = plane.x; prev[1] = plane.y; prev[2] = plane.z;
-    stepPlane(plane, input, room, seed);
-    tick++;
-    cur[0] = plane.x; cur[1] = plane.y; cur[2] = plane.z;
-    if (plane.crumpled === 0 && !plane.events.includes("refold")) {
-        const before = run.next, r = run.step(prev[0], prev[1], prev[2], cur[0], cur[1], cur[2]);
-        if (r) {
-            view.updateRings(run.next, before);
-            game.juice.shake(0.05);
-            if (r === "done") finish();
-        }
-    }
-    for (const e of plane.events) {
-        if (e === "crumple") { stats.crumples++; game.juice.shake(0.3); game.juice.freeze(80); }
-        else if (e === "flap") { stats.flaps++; game.juice.shake(0.02); }
-        else if (e === "stall") stats.stalls++;
+    if (!client.joined || !view) return;
+    const me = client.me;
+    if (awaitingFirst && client.snaps.length) { controls.resetAim(me); awaitingFirst = false; }
+    const input = controls.gather(me);
+    client.tick(input);
+    // my plane's own events this tick (predicted)
+    for (const e of me.events) {
+        if (e === "crumple") { game.juice.shake(0.3); game.juice.freeze(80); }
         else if (e === "glance") game.juice.shake(0.06);
-        else if (e === "refold") controls.resetAim(plane);
+        else if (e === "flap") game.juice.shake(0.02);
+        else if (e === "ring" || e === "done") { game.juice.shake(0.05); view.updateRings(me.run ? me.run.next : 0, me.ringPassed); }
+        else if (e === "refold" || e === "restart") { controls.resetAim(me); if (e === "restart") view.updateRings(0); }
     }
-    view.step(plane.clock * DT);
-    planeView.step(plane, FOLDS[plane.fold]);
+    mine.step(me, FOLDS[me.fold]);
+    if (room) room.tick();
+    view.step(me.clock * DT);
 });
 
-function finish() {
-    const s = run.seconds, key = `${room.id}/${setIndex}/${fold}`, was = best[key];
-    if (!was || s < was) best[key] = s;
-    $("result").hidden = false;
-    $("result").innerHTML = `<b>${run.set.name}</b> in ${s.toFixed(2)} s with the ${FOLDS[fold].name}${was && s < was ? " (new best)" : was ? ` (best ${was.toFixed(2)} s)` : ""}<br>` +
-        `<span class="small">${keyHint(settings.bindings, "restart")} to fly it again, N for the next set, 1 2 3 to change fold</span>`;
-}
-
 // ------------------------------------------------------------------ each frame
-const at = [0, 0, 0];
+const at = { x: 0, y: 0, z: 0 }, sample = {}, labels = new Map();
 game.onRender((frameDelta, alpha) => {
-    for (let i = 0; i < 3; i++) at[i] = prev[i] + (cur[i] - prev[i]) * alpha;
-    const f = FOLDS[plane.fold];
-    const viewYaw = controls.mode === "mouse" ? controls.aim.yaw : plane.yaw;
-    const viewPitch = (controls.mode === "mouse" ? controls.aim.pitch : plane.pitch) * 0.6;
+    client.frame(frameDelta);
+    if (!client.joined || !view) return;
+    const me = client.me, f = FOLDS[me.fold];
+    client.myPosition(alpha, at);
+    // the rings follow the server's word too (a restart, a correction)
+    if (me.run && me.run.next !== ringsShown) { ringsShown = me.run.next; view.updateRings(ringsShown); }
+    const viewYaw = controls.mode === "mouse" ? controls.aim.yaw : me.yaw;
+    const viewPitch = (controls.mode === "mouse" ? controls.aim.pitch : me.pitch) * 0.6;
     chase.lean = settings.lean; chase.fovKick = settings.fovKick && !settings.reducedMotion; chase.horizonLock = settings.horizonLock;
-    chase.update(frameDelta, at, viewYaw, viewPitch, plane.crumpled > 0 ? 0 : plane.roll, (plane.speed - f.cruise) / (f.max - f.cruise));
-    planeView.frame(frameDelta, settings);
-    view.frame((plane.clock - 1 + alpha) * DT);
+    chase.update(frameDelta, [at.x, at.y, at.z], viewYaw, viewPitch, me.crumpled > 0 ? 0 : me.roll, (me.speed - f.cruise) / (f.max - f.cruise));
+    // my plane is drawn where prediction put it, smoothed through corrections
+    mine.root.position[0] = at.x; mine.root.position[1] = at.y; mine.root.position[2] = at.z;
+    mine.root.teleport();
+    mine.frame(frameDelta, settings);
+
+    // everyone else, from interpolated snapshots
+    for (const [id, info] of client.players) {
+        if (id === client.id) continue;
+        if (!client.sample(id, sample)) continue;
+        let o = others.get(id);
+        if (!o) {
+            o = { view: new PlaneView(game.scene, { effects: view.effects, remote: true, color: TINTS[id % TINTS.length] }), proxy: remoteProxy(), events: [] };
+            others.set(id, o);
+        }
+        const p = o.proxy;
+        p.x = sample.x; p.y = sample.y; p.z = sample.z; p.yaw = sample.yaw; p.pitch = sample.pitch; p.roll = sample.roll;
+        p.vx = sample.vx; p.vy = sample.vy; p.vz = sample.vz;
+        p.fold = FOLD_IDS[sample.fold] || "glider";
+        p.speed = Math.hypot(sample.vx, sample.vy, sample.vz);
+        p.crumpled = sample.flags & FLAG.crumpled ? 1 : 0; p.stalled = (sample.flags & FLAG.stalled) !== 0; p.guard = sample.flags & FLAG.guard ? 1 : 0;
+        p.events.length = 0;
+        for (const e of o.events) { p.events.push(e.type); if (e.x !== undefined) { p.hit.x = e.x; p.hit.y = e.y; p.hit.z = e.z; } }
+        o.events.length = 0;
+        o.view.step(p, FOLDS[p.fold]);
+        o.view.frame(frameDelta, settings);
+        label(id, info.name, p);
+    }
+    for (const [id, el] of labels) if (!others.has(id)) { el.remove(); labels.delete(id); }
+    view.frame((me.clock - 1 + alpha) * DT);
     drawHud();
 });
 
-/** the short prompt that belongs to the next ring, or to a stall */
-const TIPS = {
-    thermal: "Circle in the warm air to climb",
-    fan: "Ride the fan's stream",
-    stall: "Climb to the high ring. Stalled? Dive to pick up speed",
-};
+function remoteProxy() {
+    return { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, vx: 0, vy: 0, vz: 0, speed: 0, crumpled: 0, stalled: false, guard: 0, inFan: 0, inGust: 0, fold: "glider", events: [], hit: { x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 1 } };
+}
+
+/** a name above another plane */
+function label(id, name, p) {
+    let el = labels.get(id);
+    if (!el) { el = document.createElement("div"); el.className = "label"; $("labels").append(el); labels.set(id, el); }
+    const s = camera.project([p.x, p.y, p.z + 0.06], canvas.clientWidth, canvas.clientHeight);
+    el.hidden = !s.visible;
+    if (s.visible) { el.textContent = name; el.style.transform = `translate(${s.x}px, ${s.y}px) translate(-50%, -100%)`; }
+}
+
+const TIPS = { thermal: "Circle in the warm air to climb", fan: "Ride the fan's stream", stall: "Climb to the high ring. Stalled? Dive to pick up speed" };
 let hudAt = 0;
 function drawHud() {
     const now = performance.now();
     if (now - hudAt < 66) return;
     hudAt = now;
-    const f = FOLDS[plane.fold], p = plane;
-    $("flap").style.setProperty("--charge", String(p.flapWait <= 0 ? 1 : 1 - (p.flapWait * DT) / f.flap));
-    $("flap").classList.toggle("ready", p.flapWait <= 0);
-    // ring and time
-    $("ring").textContent = run.done ? `${run.set.name}: done` : `${run.set.name}  ring ${run.next + 1} of ${run.set.rings.length}  ${run.next > 0 ? run.seconds.toFixed(1) + " s" : ""}`;
-    // the aim circle
+    const me = client.me, f = FOLDS[me.fold], run = me.run;
+    $("notice").hidden = now > noticeUntil;
+    $("flap").style.setProperty("--charge", String(me.flapWait <= 0 ? 1 : 1 - (me.flapWait * DT) / f.flap));
+    $("flap").classList.toggle("ready", me.flapWait <= 0);
+    $("ring").textContent = !run ? "" : run.done ? `${run.set.name}: done in ${run.seconds.toFixed(2)} s  (${keyHint(settings.bindings, "restart")} to fly it again)` : `${run.set.name}  ring ${run.next + 1} of ${run.set.rings.length}  ${run.next > 0 ? run.seconds.toFixed(1) + " s" : ""}`;
     const aimEl = $("aim");
-    aimEl.hidden = controls.mode !== "mouse" || p.crumpled > 0;
+    aimEl.hidden = controls.mode !== "mouse" || me.crumpled > 0;
     if (!aimEl.hidden) {
         const d = 3, a = controls.aim;
-        const s = camera.project([at[0] + Math.cos(a.pitch) * Math.cos(a.yaw) * d, at[1] + Math.cos(a.pitch) * Math.sin(a.yaw) * d, at[2] + Math.sin(a.pitch) * d], canvas.clientWidth, canvas.clientHeight);
+        const s = camera.project([at.x + Math.cos(a.pitch) * Math.cos(a.yaw) * d, at.y + Math.cos(a.pitch) * Math.sin(a.yaw) * d, at.z + Math.sin(a.pitch) * d], canvas.clientWidth, canvas.clientHeight);
         aimEl.style.transform = `translate(${s.x}px, ${s.y}px)`;
     }
-    // a tip: stalled beats the ring's own tip; the ring's tip floats by the ring
-    const tipEl = $("tip"), ring = run.ring;
+    const tipEl = $("tip"), ring = run && !run.done ? run.ring : null;
     let tip = "", where = null;
-    if (p.stalled && p.crumpled === 0) tip = "Stalled! Dive to pick up speed";
-    else if (p.crumpled > 0) tip = "Crumpled. Refolding…";
-    else if (ring && ring.tip && setIndex === 0) { tip = TIPS[ring.tip]; where = camera.project(ring.at, canvas.clientWidth, canvas.clientHeight); }
+    if (me.stalled && me.crumpled === 0) tip = "Stalled! Dive to pick up speed";
+    else if (me.crumpled > 0) tip = "Crumpled. Refolding…";
+    else if (ring && ring.tip && client.room.set === 0) { tip = TIPS[ring.tip]; where = camera.project(ring.at, canvas.clientWidth, canvas.clientHeight); }
     tipEl.textContent = tip;
     tipEl.hidden = !tip;
     if (where && where.visible) { tipEl.style.left = `${Math.max(120, Math.min(canvas.clientWidth - 120, where.x))}px`; tipEl.style.top = `${Math.max(60, Math.min(canvas.clientHeight - 90, where.y - 50))}px`; }
     else { tipEl.style.left = "50%"; tipEl.style.top = "22%"; }
-    // the gust telegraph also as a caption
-    const until = view.gustIn(view.airTime || 0);
+    const until = view.gustIn((me.clock || 0) * DT);
     $("caption").textContent = until > 0 && until < 1.5 ? "The curtains stir: a gust is coming" : until <= 0 ? "Gust from the window" : "";
+    // who is here and how far through the set they are
+    const rows = [...client.players.values()].map((p) => `<li${p.id === client.id ? ' class="me"' : ""}><span></span> ${p.next}/${run ? run.set.rings.length : 0}${p.best ? ` · ${(p.best * DT).toFixed(1)} s` : ""}</li>`);
+    const list = $("players");
+    if (list.childElementCount !== rows.length || list.dataset.v !== rows.join("")) {
+        list.innerHTML = rows.join(""); list.dataset.v = rows.join("");
+        [...list.querySelectorAll("li span")].forEach((el, i) => { const p = [...client.players.values()][i]; el.textContent = `${p.name}${p.bot ? " (bot)" : ""} · ${FOLDS[p.fold] ? FOLDS[p.fold].name : ""}`; });
+    }
     if (!$("debug").hidden) {
+        const st = client.stats;
         $("debug").textContent =
-            `${f.name}  airspeed ${p.speed.toFixed(2)} m/s (stall ${f.stall})  height ${p.z.toFixed(2)} m  climb ${p.vz >= 0 ? "+" : ""}${p.vz.toFixed(2)}\n` +
-            `fan ${(p.inFan * 100) | 0}%  lift ${(p.inLift * 100) | 0}%  gust ${(p.inGust * 100) | 0}%  bank ${((p.roll * 180) / Math.PI).toFixed(0)}°  ${controls.mode}\n` +
-            `crumples ${stats.crumples}  flaps ${stats.flaps}  stalls ${stats.stalls}  ${(game.loop.fps || 0).toFixed(0)} fps`;
+            `${f.name}  airspeed ${me.speed.toFixed(2)} m/s  height ${me.z.toFixed(2)} m  ${controls.mode}\n` +
+            `ping ${client.ping} ms  in ${(st.bytesIn / 1024).toFixed(1)} kB/s  out ${(st.bytesOut / 1024).toFixed(1)} kB/s  snaps ${st.snaps}/s\n` +
+            `prediction error ${st.lastError.toFixed(4)} m  corrections ${st.corrections}  replayed ${st.replayed}  ${(game.loop.fps || 0).toFixed(0)} fps`;
     }
 }
 
-restart();
-window.planes = { game, view, planeView, controls, settings, get plane() { return plane; }, get run() { return run; }, stats, restart, setSet(i) { setIndex = i; restart(); }, setFold(f) { fold = f; restart(); } };
+window.planes = { game, client, controls, settings, get view() { return view; }, get room() { return room; }, others, startPractice, playOnline, show };
+show("title");
 game.start();

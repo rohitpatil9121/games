@@ -158,6 +158,7 @@ export class Controls {
         const input = this.input, out = { pitch: 0, roll: 0, buttons: 0 };
         if (!this.active) return out;
         if (this.held("flap")) out.buttons |= BTN.flap;
+        if (this.held("restart")) out.buttons |= BTN.restart;
         let x = input.axis("roll"), y = input.axis("pitch");
         const pad = this._pad();
         if (pad) {
