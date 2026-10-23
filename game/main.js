@@ -30,6 +30,7 @@ game.renderer.postfx = new PostFX(game.renderer, { bloom: { threshold: 1.2, inte
 
 const settings = { sensitivity: 1, invertPitch: false, bindings: defaultBindings(), lean: 1, fovKick: true, horizonLock: false, reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches };
 game.juice.reducedMotion = settings.reducedMotion;
+document.body.classList.toggle("reduce-motion", settings.reducedMotion);
 const client = new Client();
 const controls = new Controls(game.input, canvas, settings);
 /** @type {GreyboxView | null} */
