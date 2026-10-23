@@ -8,11 +8,13 @@
  * - stress: random input for minutes of play; the player is never inside rock or a wall
  * @module tools/test
  */
-import { makeWorld, WORLD, solidAt, boxAt, islandUnder } from "../game/islands.js";
+import { makeWorld, WORLD, solidAt, boxAt, islandUnder, topAt } from "../game/islands.js";
 import { createState, step, hashState, dayT, NO_INPUT } from "../game/sim.js";
 import { makePilot, pilotInput, firstLoopPlan } from "../game/pilot.js";
 import { MOVE, TICK_RATE, BTN } from "../game/data.js";
 import { makeRandom } from "../game/det.js";
+import { weatherOf, rainingAt } from "../game/farm.js";
+import { CROPS, DAY_TICKS, WEATHER } from "../game/data.js";
 
 let failed = 0;
 const check = (ok, what) => { console.log((ok ? "  ok   " : "  FAIL ") + what); if (!ok) failed++; };
@@ -83,6 +85,82 @@ const world = makeWorld(WORLD);
         if ((inRock || (wall && wall.kind === "wall")) && bad++ === 0) first = `tick ${i} at ${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)} (${p.mode}) in ${inRock ? "rock" : "a wall"}`;
     }
     check(bad === 0, `six minutes of random input: never inside rock or a wall (${glides} glides, ${falls} falls)${bad ? ": " + bad + " ticks, first " + first : ""}`);
+}
+
+// ---------------------------------------------------------------- the farm (stage 4)
+{
+    // weather: the same for a seed, about the chances asked for, no storm before day 4
+    const counts = { clear: 0, breezy: 0, rain: 0, storm: 0 };
+    let early = 0;
+    for (let day = 1; day <= 2000; day++) { const w = weatherOf(world.data.seed, day); counts[w.kind]++; if (w.kind === "storm" && day < WEATHER.stormFrom) early++; }
+    const share = (k) => counts[k] / 2000;
+    check(early === 0 && Math.abs(share("rain") - 0.18) < 0.04 && Math.abs(share("clear") - 0.45) < 0.05, `weather over 2000 days: clear ${(share("clear") * 100).toFixed(0)}%, breezy ${(share("breezy") * 100).toFixed(0)}%, rain ${(share("rain") * 100).toFixed(0)}%, storm ${(share("storm") * 100).toFixed(0)}%, no early storms`);
+
+    // a garden of one of each crop at home, planted by hand, then days pass
+    const at = (s, ix, iy) => s.plots.get(ix + "," + iy);
+    const plant = (s, ix, iy, crop) => { const p = s.player; p.x = ix - 0.6; p.y = iy + 0.5; p.z = topAt(islandUnder(world, p.x, p.y), p.x, p.y); p.fx = 1; p.fy = 0; p.ground = true; s.pouch.seeds[crop] = 9; s.pouch.selected = crop; for (let k = 0; k < 40 && !(at(s, ix, iy) && at(s, ix, iy).crop); k++) step(s, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact }); return s.events; };
+    const s = createState(world);
+    let wrong = false;
+    for (let i = 0; i < 4; i++) { plant(s, 4 + i, -1, ["moonbean", "turnip", "cotton", "frostmint"][i]); }
+    // the frost-mint can't go in at home: it needs the High Rocks
+    wrong = !at(s, 7, -1) || !at(s, 7, -1).crop;
+    check(wrong, "frost-mint won't grow at home (it needs a garden above 400 m)");
+    // the moon-bean grows only at night: water it at noon, and by blue hour it hasn't moved
+    const mb = at(s, 4, -1), tp = at(s, 5, -1);
+    mb.watered = true; tp.watered = true;
+    while ((s.tick % DAY_TICKS) / DAY_TICKS < 0.84) step(s, NO_INPUT);
+    const dayGrowth = mb.growth;
+    // and through the night it does
+    while ((s.tick % DAY_TICKS) / DAY_TICKS > 0.5) step(s, NO_INPUT);
+    check(dayGrowth === 0 && mb.growth > 0, `moon-bean: 0 growth by day, ${(mb.growth * 100).toFixed(0)}% overnight`);
+
+    // rain waters and speeds things up: find a rainy day and compare a watered turnip's day there with a dry one
+    let rainDay = 2; while (weatherOf(world.data.seed, rainDay).kind !== "rain") rainDay++;
+    const w = weatherOf(world.data.seed, rainDay);
+    check(rainingAt(world.data.seed, (rainDay - 1) * DAY_TICKS + Math.round((w.rainFrom + w.rainTo) / 2 * DAY_TICKS)) && !rainingAt(world.data.seed, (rainDay - 1) * DAY_TICKS + Math.round(0.01 * DAY_TICKS)), `day ${rainDay} rains from ${(w.rainFrom * 100).toFixed(0)}% to ${(w.rainTo * 100).toFixed(0)}% of the way through the day`);
+    check(!at(s, 6, -1) || !at(s, 6, -1).crop, "cloud-cotton won't grow at home either (it's an Orchard crop)");
+
+    // cloud-cotton in the Apple Terraces garden: watered every day of a dry spell, it stops at two-thirds; a rainy day finishes it
+    const o = createState(world), og = o.world.data.gardens.find((q) => q.island === "apple");
+    plant(o, og.x0 + 1, og.y0 + 1, "cotton");
+    const ct = at(o, og.x0 + 1, og.y0 + 1);
+    let dry = 1; while (weatherOf(world.data.seed, dry).rainTo > 0 || weatherOf(world.data.seed, dry + 1).rainTo > 0 || weatherOf(world.data.seed, dry + 2).rainTo > 0) dry++;
+    o.tick = (dry - 1) * DAY_TICKS + 10; ct.growth = 0;
+    for (let d = 0; d < 3; d++) { ct.watered = true; const next = (dry + d) * DAY_TICKS; while (o.tick < next) { step(o, NO_INPUT); ct.watered = true; } }
+    const dryGrowth = ct.growth;
+    let wet = dry + 3; while (weatherOf(world.data.seed, wet).rainTo === 0) wet++;
+    o.tick = (wet - 1) * DAY_TICKS + 10;
+    for (let d = 0; d < 3 && ct.growth < 1; d++) { const next = (wet + d) * DAY_TICKS; while (o.tick < next) { step(o, NO_INPUT); ct.watered = true; } }
+    check(Math.abs(dryGrowth - 2 / 3) < 1e-6 && ct.growth >= 1, `cloud-cotton: ${(dryGrowth * 100).toFixed(0)}% after three dry days (it waits for rain), ripe ${Math.ceil(o.tick / DAY_TICKS) - wet + 1} day(s) after the rain on day ${wet}`);
+
+    // pollination: three sunflowers and two berry bushes in bloom bring sprites; a pollinated turnip yields 3, not 2
+    const g = createState(world);
+    const spots = [[4, -4, "sunflower"], [5, -4, "sunflower"], [6, -4, "sunflower"], [4, -5, "berry"], [5, -5, "berry"], [7, -4, "turnip"]];
+    for (const [ix, iy, c] of spots) plant(g, ix, iy, c);
+    for (const [ix, iy] of spots) { const p = at(g, ix, iy); p.growth = p.crop === "turnip" ? 0.95 : 0.6; }
+    g.player.x = -6; g.player.y = -2;
+    let arrived = 0;
+    for (let i = 0; i < 60 * 90; i++) { step(g, NO_INPUT); if (g.events.some((e) => e.type === "sprite-arrives")) arrived++; }
+    const tn = at(g, 7, -4);
+    tn.growth = 1;
+    g.player.x = 6.2; g.player.y = -3.5; g.player.fx = 1; g.player.fy = 0;
+    const before = g.pouch.crops.turnip;
+    for (let k = 0; k < 40 && g.pouch.crops.turnip === before; k++) step(g, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact });
+    check(arrived > 0 && tn.pollinated === false && g.pouch.crops.turnip - before === 3, `sprites came (${arrived} arrivals, ${g.sprites.length} there now); the pollinated turnip gave ${g.pouch.crops.turnip - before}`);
+
+    // a berry bush regrows after picking
+    const bb = at(g, 4, -5);
+    bb.growth = 1; g.player.x = 3.4; g.player.y = -4.5;
+    const b0 = g.pouch.crops.berry;
+    for (let k = 0; k < 40 && g.pouch.crops.berry === b0; k++) step(g, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact });
+    check(bb.crop === "berry" && Math.abs(bb.growth - CROPS.berry.regrow) < 1e-9, `the berry bush gave ${g.pouch.crops.berry - b0} berries and went back to ${(bb.growth * 100).toFixed(0)}%`);
+
+    // cooking: two turnips at the stove make soup: 15 s more stamina today
+    const c = createState(world), cp = c.player;
+    c.pouch.crops.turnip = 2;
+    cp.x = c.world.data.stove.x + 0.5; cp.y = c.world.data.stove.y;
+    for (let k = 0; k < 20 && !cp.meal; k++) step(c, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact });
+    check(cp.meal === 15 && c.pouch.crops.turnip === 0, `turnip soup: meal +${cp.meal} s, turnips left ${c.pouch.crops.turnip}`);
 }
 
 console.log(failed ? `${failed} failed` : "all passed");

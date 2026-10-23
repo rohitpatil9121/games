@@ -1,7 +1,8 @@
 import { Game, Camera, PostFX, Audio } from "../engine/index.js";
 import { TICK_RATE, CROPS, STAMINA, GLIDE } from "./data.js";
 import { quantizeYaw } from "./det.js";
-import { makeWorld, WORLD } from "./islands.js";
+import { makeWorld, WORLD, topAt } from "./islands.js";
+const topAtPlot = (isl, ix, iy) => topAt(isl, ix + 0.5, iy + 0.5);
 import { createState, step, dayT, dayNumber } from "./sim.js";
 import { World } from "./world.js";
 import { Rig } from "./camera.js";
@@ -90,14 +91,20 @@ game.onUpdate(() => {
     view3d.events(state);
 });
 
-const NAMES = { turnip: "Turnip", ropegrass: "Rope-grass" };
+const NAMES = Object.fromEntries(Object.entries(CROPS).map(([id, c]) => [id, c.name]));
+const BAND = { meadow: "the Meadow", orchard: "the Orchard Isles", high: "the High Rocks (above 400 m)" };
+let toldSprites = false;
 function onEvent(e) {
     const p = state.player;
     if (["till", "plant", "water", "harvest", "pick", "sprout", "open", "land", "bump"].includes(e.type)) {
         audio.play(e.type === "land" && e.hard ? "bump" : e.type, { pitch: 0.95 + Math.random() * 0.1 });
     }
     if (e.type === "pick") notice(e.kind === "glider" ? "Grandmother's glider. Jump off an edge, then jump again to open it." : `${NAMES[e.crop] || e.crop} ${e.kind === "seed" ? "seeds" : ""} ×${e.count}`);
-    else if (e.type === "harvest") notice(`${NAMES[e.crop]} ×${e.count}, and a seed back`);
+    else if (e.type === "harvest") notice(`${NAMES[e.crop]} ×${e.count}${e.pollinated ? " (the sprites helped)" : ""}${e.seeds ? ", and " + (e.seeds > 1 ? e.seeds + " seeds" : "a seed") + " back" : ""}`);
+    else if (e.type === "wrong-band") notice(`${NAMES[e.crop]} won't grow here. It needs a garden in ${CROPS[e.crop].grows.map((b) => BAND[b]).join(" or ")}.`);
+    else if (e.type === "cook") notice(`${e.name}: +${e.stamina} s of gliding today`);
+    else if (e.type === "cant-cook") notice("Nothing to cook yet. Two turnips make a soup.");
+    else if (e.type === "pollinated" && !toldSprites) { toldSprites = true; notice("A sprite is visiting your flowers. Crops near them will give more."); }
     else if (e.type === "sprout") notice(`Your ${NAMES[e.crop].toLowerCase()} has sprouted`);
     else if (e.type === "fell" || e.type === "slept") fade(e.type === "fell" ? "You wake up at home." : `Day ${dayNumber(state)}`);
     else if (e.type === "not-tired") notice("Not tired yet. Come back after noon.");
@@ -110,7 +117,7 @@ let noticeTimer = 0;
 function notice(text) { $("notice").textContent = text; $("notice").classList.add("on"); noticeTimer = 3.2; }
 function fade(text) { const f = $("fade"); f.textContent = text; f.classList.remove("on"); void f.offsetWidth; f.classList.add("on"); }
 
-const DOES = { till: "Till", plant: "Plant", water: "Water", harvest: "Harvest", pick: "Pick up", sleep: "Sleep" };
+const DOES = { till: "Till", plant: "Plant", water: "Water", harvest: "Harvest", pick: "Pick up", sleep: "Sleep", cook: "Cook", stove: "Stove" };
 game.onRender((dt, alpha) => {
     if (!window.__firstFrame) window.__firstFrame = performance.now();
     controls.look(dt);
@@ -145,7 +152,9 @@ function hud(dt) {
     const crops = Object.entries(pouch.crops).filter(([, n]) => n > 0).map(([c, n]) => `<span>${NAMES[c]} ×${n}</span>`);
     $("pouch").innerHTML = [...seeds, ...crops].join("") || "<span class='empty'>empty pouch</span>";
     const t = dayT(state), hours = (6 + t * 18) % 24;
-    $("clock").textContent = `Day ${dayNumber(state)} · ${String(Math.floor(hours)).padStart(2, "0")}:${String(Math.floor((hours % 1) * 60)).padStart(2, "0")}`;
+    const w = state.weather, clock = (f) => { const h = (6 + f * 18) % 24; return String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0"); };
+    const sky = w.kind === "rain" || w.kind === "storm" ? (t < w.rainFrom ? `${w.kind} at ${clock(w.rainFrom)}` : t < w.rainTo ? (w.kind === "storm" ? "storm" : "raining") : "clearing") : w.kind;
+    $("clock").textContent = `Day ${dayNumber(state)} · ${clock(t)} · ${sky}`;
     const ring = $("stamina"), frac = p.stamina / STAMINA.max;
     ring.classList.toggle("on", p.mode === "glide" && frac < 0.999);
     ring.style.setProperty("--f", String(frac));
@@ -158,6 +167,21 @@ window.skyfarm = {
     game, world, view: view3d, rig, controls, get state() { return state; },
     /** start a fresh game */
     reset() { state = createState(world); },
+    /** a demonstration garden: every crop at home (or in its own band's garden) at a spread of growth, for screenshots */
+    demoGarden(spread = [0.1, 0.35, 0.6, 1]) {
+        const ids = Object.keys(CROPS), f = world.data.field;
+        let k = 0;
+        for (const id of ids) {
+            const band = CROPS[id].grows[0], g = band === "meadow" ? { ...f, island: "hearth" } : world.data.gardens.find((q) => world.byId[q.island].band === band);
+            for (const gr of spread) {
+                const ix = g.x0 + ((band === "meadow" ? k : k % 7) % (g.x1 - g.x0 + 1)), iy = g.y0 + Math.floor((band === "meadow" ? k : k % 7) / (g.x1 - g.x0 + 1)) % (g.y1 - g.y0 + 1);
+                const isl = world.byId[g.island];
+                state.plots.set(ix + "," + iy, { ix, iy, island: isl.id, band: isl.band, z: topAtPlot(isl, ix, iy), tilled: true, crop: id, growth: gr, watered: gr < 1, days: 0, grew: false, pollinated: false, rained: false });
+                k++;
+            }
+        }
+        return k;
+    },
     /** let the test pilot play the first loop */
     autopilot() { pilot = makePilot(firstLoopPlan(world)); return true; },
     /** Run the game by hand for some seconds (the Browser pane may throttle requestAnimationFrame). */

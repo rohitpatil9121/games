@@ -5,13 +5,14 @@
   "description": "SKYFARM: a cosy open-world sky-island farming game built on Projection Lab",
   "scripts": {
     "start": "node tools/serve.mjs 8160",
-    "test": "node tools/test.mjs && node tools/check-world.mjs",
+    "test": "node tools/test.mjs && node tools/check-world.mjs && node tools/economy.mjs",
     "world": "node tools/make-world.mjs && node tools/check-world.mjs",
     "playtest": "node tools/playtest.mjs",
     "inspect": "node tools/inspect.mjs",
     "views": "node tools/views.mjs",
     "views:lock": "node tools/views.mjs --lock",
     "perf": "node tools/perf.mjs",
-    "stream": "node tools/stream-test.mjs"
+    "stream": "node tools/stream-test.mjs",
+    "economy": "node tools/economy.mjs"
   }
 }

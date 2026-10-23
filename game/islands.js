@@ -1,6 +1,6 @@
 import { dsin, dcos, datan2, hash3, smooth, clamp, TAU } from "./det.js";
 import { MOVE } from "./data.js";
-import { ISLANDS, AIR, BANDS } from "./world-data.js";
+import { ISLANDS, AIR, BANDS, ITEMS, GARDENS } from "./world-data.js";
 import { landmarkShapes, shapeBox } from "./landmarks.js";
 
 /**
@@ -39,8 +39,9 @@ export const HOME = Object.freeze({
     /** the home tree: a big old oak on the west side; the little broken windmill by the south-east rim */
     tree: { x: -15, y: 8, seed: 7, height: 15 },
     windmill: { x: 15.5, y: -13.5, r: 1.7 },
-    /** where you wake */
+    /** where you wake, and the stove you cook on */
     wake: { x: -7.4, y: -1.2, yaw: 0 },
+    stove: { x: -8.2, y: 0.0 },
     items: [
         { kind: "seed", crop: "turnip", count: 1, x: -4.6, y: -3.4, z: 0.9 },
         { kind: "glider", x: 4, y: 9, z: 1.1 },
@@ -49,7 +50,7 @@ export const HOME = Object.freeze({
 });
 
 /** The world: the 20 generated islands (game/world-data.js, from tools/make-world.mjs), their air, and home. */
-export const WORLD = Object.freeze({ islands: ISLANDS, air: AIR, bands: BANDS, ...HOME });
+export const WORLD = Object.freeze({ islands: ISLANDS, air: AIR, bands: BANDS, ...HOME, items: [...HOME.items, ...ITEMS], gardens: GARDENS, seed: 20261023 });
 
 const EDGE = 4.5, EDGE_DROP = 1.6, RIM = 2.2;
 
@@ -158,6 +159,9 @@ export function makeWorld(data) {
     box(x1 - t, h.y + h.door / 2, x1, y1, z0 + h.h, "wall");
     // the roof: you can land on it, you can't walk through it from below
     boxes.push({ x0: x0 - 0.6, y0: y0 - 0.6, x1: x1 + 0.6, y1: y1 + 0.6, z0: z0 + h.h, z1: z0 + h.h + 0.35, kind: "roof" });
+    // the stove inside the hut
+    const sv = data.stove;
+    boxes.push({ x0: sv.x - 0.5, y0: sv.y - 0.35, x1: sv.x + 0.5, y1: sv.y + 0.35, z0: z0 - 1, z1: z0 + 0.92, kind: "stone" });
     // the home windmill's tower and the home tree's trunk
     const w = data.windmill, wz = groundUnder(w.x, w.y);
     boxes.push({ x0: w.x - w.r, y0: w.y - w.r, x1: w.x + w.r, y1: w.y + w.r, z0: wz - 1, z1: wz + 6, kind: "stone" });
@@ -255,4 +259,11 @@ export function rayWorld(world, ox, oy, oz, dx, dy, dz, max) {
 export function inField(world, ix, iy) {
     const f = world.data.field;
     return ix >= f.x0 && ix <= f.x1 && iy >= f.y0 && iy <= f.y1;
+}
+
+/** The garden the tile is in (the home field, or one of the gardens on other islands), or null. */
+export function gardenAt(world, ix, iy) {
+    if (inField(world, ix, iy)) return { island: world.islands[0].id, ...world.data.field };
+    for (const g of world.data.gardens || []) if (ix >= g.x0 && ix <= g.x1 && iy >= g.y0 && iy <= g.y1) return g;
+    return null;
 }

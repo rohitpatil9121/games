@@ -9,6 +9,8 @@ import { skyMaterial } from "./gfx/sky.js";
 import { seaGeometry, seaMaterial, cumulusGeometry, cumulusMaterial } from "./gfx/clouds.js";
 import { Streamer } from "./gfx/stream.js";
 import { part, KIND, propMaterial } from "./gfx/props.js";
+import { drawCrops, drawSprites } from "./gfx/crops.js";
+import { rainingAt } from "./farm.js";
 import { makeRandom } from "./det.js";
 
 /**
@@ -98,10 +100,12 @@ export class World {
         // plots and crops: instanced, painted by the prop material (colour alpha = surface kind)
         const ipm = propMaterial(false);
         const inst = (geo, n) => { const m = new InstancedMesh(geo, ipm, n); m.count = 0; add(new Entity({ mesh: m, frustumCulled: false })); return m; };
-        this.soil = inst(primitives.box(0.94, 0.94, 0.16), 256);
-        this.leaves = inst(primitives.cone(0.5, 1, 6), 512);
-        this.bulbs = inst(primitives.sphere(0.5, 12, 8), 256);
-        this.seeds = inst(primitives.sphere(0.5, 10, 8), 32);
+        this.crops = { soil: inst(primitives.box(0.94, 0.94, 0.16), 400), leaves: inst(primitives.cone(0.5, 1, 6), 3000), balls: inst(primitives.sphere(0.5, 10, 7), 2000), stems: inst(primitives.cylinder(0.5, 0.5, 1, 6), 600) };
+        this.seeds = inst(primitives.sphere(0.5, 10, 8), 64);
+        this.spriteMesh = inst(primitives.sphere(0.5, 8, 6), 64);
+        // rain: streaks falling round the camera (the full weather pass is stage 7)
+        this.rain = scene.add(new ParticleSystem({ capacity: 2500, gravity: [0, 0, -2], drag: 0, blending: "normal", name: "rain" }));
+        this.rain.castShadow = false; this.rain.frustumCulled = false;
         this.gliderItem = add(new Entity({ name: "glider-item", mesh: new Mesh(canopyGeometry(), pm) }));
         this.gliderItem.setScale(0.45);
 
@@ -152,6 +156,9 @@ export class World {
         let m = Math.hypot(sx, sy, sz);
         sx /= m; sy /= m; sz /= m;
         const E = sunLight(eye[2], sz, this._c);
+        // under rain clouds the sun is dimmed and the light goes grey-blue (eased, so it doesn't snap)
+        this.overcast = (this.overcast || 0) + ((this.raining ? 1 : 0) - (this.overcast || 0)) * 0.02;
+        for (let i = 0; i < 3; i++) E[i] *= 1 - 0.6 * this.overcast;
         shared.u_atmoSun.set(E);
         // night: the moon lights the scene dimly from the other side
         const night = 1 - Math.min(1, Math.max(0, (sz + 0.04) / 0.14));
@@ -231,6 +238,8 @@ export class World {
         }
 
         this.drawFarm(state);
+        drawSprites(this.spriteMesh, state, this.time, 0);
+        this.drawRain(state, eye, dt);
         this.drawItems(state);
         this.drawCursor(state);
         this.drawAir(state, eye, dt);
@@ -238,43 +247,8 @@ export class World {
     }
 
     drawFarm(state) {
-        const home = this.world.islands[0];
-        let ns = 0, nl = 0, nb = 0;
-        const S = KIND.soil, C = KIND.cloth;
-        for (const plot of state.plots.values()) {
-            const x = plot.ix + 0.5, y = plot.iy + 0.5, z = topAt(home, x, y);
-            this.soil.setTransform(ns, x, y, z + 0.02);
-            const c = plot.watered ? PAL.soilWet : PAL.soil;
-            this.soil.setColor(ns++, c[0], c[1], c[2], S);
-            if (!plot.crop) continue;
-            const crop = CROPS[plot.crop], g = plot.growth, ripe = g >= 1;
-            const bob = ripe ? Math.sin(this.time * 3 + x) * 0.03 : 0;
-            if (plot.crop === "turnip") {
-                // leaves grow from a sprout to a full rosette, the root swells into a bulb in the second half
-                const s = g < crop.stages[0] ? (g / crop.stages[0]) * 0.12 : 0.12 + 0.3 * Math.min(1, (g - crop.stages[0]) / (1 - crop.stages[0]));
-                for (let k = 0; k < (g < crop.stages[0] ? 2 : 5); k++) {
-                    const a = k * 2.4 + plot.ix;
-                    this.leaves.setTransform(nl, x + Math.cos(a) * s * 0.4, y + Math.sin(a) * s * 0.4, z + 0.1 + s * 0.9 + bob, s * 0.7, s * 0.35, s * 2.2, a);
-                    this.leaves.setColor(nl++, PAL.leaf[0], PAL.leaf[1], PAL.leaf[2], C);
-                }
-                if (g > 0.45) {
-                    const b = 0.1 + 0.26 * Math.min(1, (g - 0.45) / 0.55);
-                    this.bulbs.setTransform(nb, x, y, z + 0.12 + b * 0.35 + bob, b, b, b * 0.9);
-                    const tc = ripe ? PAL.turnipTop : PAL.turnip;
-                    this.bulbs.setColor(nb++, tc[0], tc[1], tc[2], C);
-                }
-            } else {
-                // rope-grass: a tuft of tall blades
-                const s = 0.15 + 0.85 * g;
-                for (let k = 0; k < 6; k++) {
-                    const a = k * 1.05 + plot.iy;
-                    this.leaves.setTransform(nl, x + Math.cos(a) * 0.15, y + Math.sin(a) * 0.15, z + 0.1 + s * 0.45, 0.05 + 0.05 * s, 0.05, s * 0.9, a);
-                    this.leaves.setColor(nl++, PAL.rope[0], PAL.rope[1], PAL.rope[2], C);
-                }
-            }
-            if (ripe && this._r() < 0.05) this.sparkle.emit(1, { position: [x, y, z + 0.6], spread: 0.35, speed: 0.2, life: [0.6, 1.2], size: [0.09, 0], color: [1.8, 1.5, 0.8, 1] });
-        }
-        this.soil.count = ns; this.leaves.count = nl; this.bulbs.count = nb;
+        const t = dayT(state), night = t > DAY.blue || t < 0.02;
+        drawCrops(this.crops, state, this.time, night, (x, y, z, teal) => this.sparkle.emit(1, { position: [x, y, z], spread: 0.35, speed: 0.2, life: [0.6, 1.2], size: [0.09, 0], color: teal ? [0.6, 1.8, 1.6, 1] : [1.8, 1.5, 0.8, 1] }));
     }
 
     drawItems(state) {
@@ -301,6 +275,17 @@ export class World {
         const p = state.player, show = p.mode === "foot" && ["till", "plant", "water", "harvest"].includes(p.does);
         this.cursor.visible = show;
         if (show) this.cursor.setPosition(p.tx + 0.5, p.ty + 0.5, topAt(this.world.islands[0], p.tx + 0.5, p.ty + 0.5) + 0.12);
+    }
+
+    /** rain round the camera while it falls (and the light dims under the cloud, in light()) */
+    drawRain(state, eye, dt) {
+        this.raining = rainingAt(state.seed, state.tick);
+        if (!this.raining) return;
+        const n = Math.round(dt * 900);
+        for (let k = 0; k < n; k++) {
+            const a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * 30;
+            this.rain.emit(1, { position: [eye[0] + Math.cos(a) * r + shared.u_wind[0] * 3, eye[1] + Math.sin(a) * r + shared.u_wind[1] * 3, eye[2] + 8 + this._r() * 6], velocity: [-shared.u_wind[0] * 1.5, -shared.u_wind[1] * 1.5, -14], life: [0.8, 1.2], size: [0.05, 0.04], color: [0.75, 0.82, 0.92, 0.55], colorEnd: [0.75, 0.82, 0.92, 0.3] });
+        }
     }
 
     /** chimney smoke and the motes of pollen that drift in the afternoon light */

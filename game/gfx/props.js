@@ -20,7 +20,7 @@ import { makeRandom } from "../det.js";
  * @module game/gfx/props
  */
 
-export const KIND = Object.freeze({ plaster: 0.05, timber: 0.15, tile: 0.25, stone: 0.35, cloth: 0.45, dark: 0.55, soil: 0.65, ridge: 0.75 });
+export const KIND = Object.freeze({ plaster: 0.05, timber: 0.15, tile: 0.25, stone: 0.35, cloth: 0.45, dark: 0.55, soil: 0.65, ridge: 0.75, glow: 0.85 });
 const COLOR = {
     plaster: [0.93, 0.88, 0.76], timber: [0.47, 0.32, 0.21], tile: [0.82, 0.34, 0.25], stone: [0.7, 0.67, 0.6], cloth: [0.92, 0.86, 0.72],
     dark: [0.12, 0.13, 0.16], soil: [0.42, 0.28, 0.18], ridge: [0.64, 0.27, 0.2],
@@ -129,6 +129,12 @@ export function hearthProps(world) {
     parts.push({ geometry: hipRoof(h.x, h.y, top - 0.05, h.w, h.d, 2.3, 0.85, 0.32), matrix: null, color: null });
     parts.push(slab(x0 + 1.0, y1 - 1.4, top - 0.3, x0 + 1.7, y1 - 0.7, top + 2.7, "stone"));
     parts.push(slab(x0 + 0.9, y1 - 1.5, top + 2.6, x0 + 1.8, y1 - 0.6, top + 2.85, "stone"));
+    // inside: the stove (stone, with an iron top and a pot), against the north wall under the chimney
+    const sv = d.stove, svz = gz(sv.x, sv.y);
+    parts.push(slab(sv.x - 0.5, sv.y - 0.35, svz, sv.x + 0.5, sv.y + 0.35, svz + 0.85, "stone"));
+    parts.push(slab(sv.x - 0.52, sv.y - 0.37, svz + 0.85, sv.x + 0.52, sv.y + 0.37, svz + 0.92, "dark", [0.2, 0.2, 0.22]));
+    parts.push(part(primitives.cylinder(0.2, 0.17, 0.25, 12), [sv.x + 0.15, sv.y, svz + 1.05], "dark", [0, 0, 0], [1, 1, 1], [0.28, 0.27, 0.27]));
+    parts.push(part(primitives.box(0.26, 0.16, 0.12), [sv.x - 0.2, sv.y - 0.36, svz + 0.3], "glow", [0, 0, 0], [1, 1, 1], [1.6, 0.7, 0.25]));
     // inside: the bed and the table
     const bz = gz(d.bed.x, d.bed.y);
     parts.push(slab(d.bed.x - 0.55, d.bed.y - 1.05, bz + 0.2, d.bed.x + 0.55, d.bed.y + 1.05, bz + 0.55, "timber"));
@@ -287,6 +293,8 @@ void main() {
         albedo = albedo + u_skyColor * 0.12 * (1.0 - abs(n.z));
     }
     vec3 color = paint(albedo, w, n, wrap, kind > 0.4 && kind < 0.5 ? 0.3 : 0.0);
+    // glow: lit from within (night flowers, sprites, lanterns), so bloom picks it up in the dark
+    if (kind > 0.8) color += albedo * 0.9;
     gl_FragColor = vec4(atmoAerial(color, w), 1.0);
 }
 `;

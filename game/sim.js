@@ -1,7 +1,8 @@
 import { TICK_RATE, DT, BTN, MOVE, GLIDE, STAMINA, SKY, DAY_TICKS, FARM, CROPS, CROP_IDS } from "./data.js";
+import { grow, farmDawn, weatherOf, harvestOf, afterHarvest, growsIn, cook, cookable, stepSprites } from "./farm.js";
 import { dsin, dcos, datan2, clamp, PI, TAU, yawOf } from "./det.js";
 import { sample, makeAir } from "./air.js";
-import { topAt, groundBelow, solidAt, boxAt, islandUnder, inField } from "./islands.js";
+import { topAt, groundBelow, solidAt, boxAt, islandUnder, gardenAt } from "./islands.js";
 
 /**
  * SKYFARM: the simulation. Pure and deterministic: no DOM, no Math.sin, no clock (TIDEFALL's rule), so the
@@ -44,7 +45,12 @@ export function createState(world, options = {}) {
     const d = world.data;
     const state = {
         world,
+        /** the world's seed: the weather of every day comes from it */
+        seed: options.seed ?? d.seed ?? 1,
+        rng: (options.seed ?? d.seed ?? 1) >>> 0,
         tick: Math.round((options.startT ?? 0.03) * DAY_TICKS),
+        /** pollinator sprites, and the flower clusters they look for (farm.js) */
+        sprites: [], nextSprite: 1, clusters: [],
         player: createPlayer(),
         /** plots by "ix,iy" */
         plots: new Map(),
@@ -59,13 +65,20 @@ export function createState(world, options = {}) {
         events: [],
         nextItem: d.items.length + 1,
     };
-    for (const [ix, iy] of d.tilled) state.plots.set(ix + "," + iy, makePlot(ix, iy));
+    for (const [ix, iy] of d.tilled) state.plots.set(ix + "," + iy, makePlot(world, ix, iy));
+    state.weather = weatherOf(state.seed, dayNumber(state));
     wake(state);
     return state;
 }
 
-/** growth 0..1; days: watered days completed (a crop planted any time in a day counts that day at dawn) */
-function makePlot(ix, iy) { return { ix, iy, tilled: true, crop: "", growth: 0, watered: false, days: 0 }; }
+/**
+ * growth 0..1; days: days of growth credited at dawn; grew: it grew at all today; pollinated: its next harvest
+ * is bigger; island and band: where it is (what may grow in it); z: the ground's height there
+ */
+function makePlot(world, ix, iy) {
+    const g = gardenAt(world, ix, iy), isl = world.byId[g ? g.island : world.islands[0].id];
+    return { ix, iy, island: isl.id, band: isl.band, z: topAt(isl, ix + 0.5, iy + 0.5), tilled: true, crop: "", growth: 0, watered: false, days: 0, grew: false, pollinated: false };
+}
 
 export function createPlayer() {
     return {
@@ -102,7 +115,7 @@ function wake(state) {
     const p = state.player, w = state.world.data.wake, home = state.world.islands[0];
     p.x = w.x; p.y = w.y; p.z = topAt(home, w.x, w.y);
     p.vx = p.vy = p.vz = 0; p.mode = "foot"; p.drift = false; p.ground = true; p.air = 0;
-    p.fx = dcos(w.yaw); p.fy = dsin(w.yaw); p.stamina = p.staminaMax;
+    p.fx = dcos(w.yaw); p.fy = dsin(w.yaw); p.stamina = staminaCap(p);
 }
 
 /** Advance the whole game one tick. */
@@ -113,37 +126,16 @@ export function step(state, input = NO_INPUT) {
     if (Math.floor(state.tick / DAY_TICKS) !== before) newDay(state);
     grow(state, 1);
     stepPlayer(state, state.player, input);
+    stepSprites(state);
     return state;
 }
 
-/** Watered crops grow `ticks` ticks' worth. */
-function grow(state, ticks) {
-    for (const plot of state.plots.values()) {
-        if (!plot.crop || !plot.watered || plot.growth >= 1) continue;
-        const c = CROPS[plot.crop], g0 = plot.growth;
-        // never past the end of today's share: the rest of the day comes at dawn
-        plot.growth = Math.min(1, (plot.days + 1) / c.days, g0 + ticks / (c.days * DAY_TICKS));
-        if (g0 < c.stages[0] && plot.growth >= c.stages[0]) state.events.push({ type: "sprout", ix: plot.ix, iy: plot.iy, crop: plot.crop });
-        if (g0 < 1 && plot.growth >= 1) state.events.push({ type: "ripe", ix: plot.ix, iy: plot.iy, crop: plot.crop });
-    }
-}
+/** the stamina the glider has today: the glider's own, plus today's meal */
+export const staminaCap = (p) => p.staminaMax + (p.meal || 0);
 
-/**
- * Dawn: a crop that was watered yesterday has had its day, however late it was planted, so it is at least that
- * many days grown (a one-day turnip planted at noon is ripe next morning). Then the soil dries, and whatever the
- * clouds took washes up on the home shore.
- */
+/** Dawn: the farm's day turns over (farm.js), and whatever the clouds took washes up on the home shore. */
 function newDay(state) {
-    for (const plot of state.plots.values()) {
-        if (plot.crop && plot.watered) {
-            const c = CROPS[plot.crop], g0 = plot.growth;
-            plot.days++;
-            plot.growth = Math.min(1, Math.max(plot.growth, plot.days / c.days));
-            if (g0 < c.stages[0] && plot.growth >= c.stages[0]) state.events.push({ type: "sprout", ix: plot.ix, iy: plot.iy, crop: plot.crop });
-            if (g0 < 1 && plot.growth >= 1) state.events.push({ type: "ripe", ix: plot.ix, iy: plot.iy, crop: plot.crop });
-        }
-        plot.watered = false;
-    }
+    farmDawn(state);
     const home = state.world.islands[0];
     let k = 0;
     for (const w of state.washed) {
@@ -243,7 +235,7 @@ function stepFoot(state, p, input, pressed) {
     } else p.ground = false;
     p.z = z;
     p.air = p.ground ? 0 : Math.min(9999, p.air + 1);
-    if (p.ground) p.stamina = Math.min(p.staminaMax, p.stamina + (p.staminaMax / STAMINA.refill) * DT);
+    if (p.ground) p.stamina = Math.min(staminaCap(p), p.stamina + (staminaCap(p) / STAMINA.refill) * DT);
 }
 
 /** a wall box, or rock above the step height, in the way of a body standing at (x, y, z) */
@@ -406,11 +398,12 @@ function aim(state, p) {
     const item = nearItem(state, p);
     if (item) { p.does = "pick"; p.item = item.id; return; }
     p.item = 0;
-    const bed = state.world.data.bed;
+    const d = state.world.data, bed = d.bed;
     if (Math.hypot(p.x - bed.x, p.y - bed.y) < 1.4) { p.does = "sleep"; return; }
+    if (Math.hypot(p.x - d.stove.x, p.y - d.stove.y) < 1.3) { p.does = cookable(state.pouch) ? "cook" : "stove"; return; }
     const ix = Math.floor(p.x + p.fx * FARM.reach), iy = Math.floor(p.y + p.fy * FARM.reach);
     p.tx = ix; p.ty = iy;
-    if (!p.ground || !inField(state.world, ix, iy)) return;
+    if (!p.ground || !gardenAt(state.world, ix, iy)) return;
     const plot = state.plots.get(key(ix, iy));
     if (plot && plot.crop && plot.growth >= 1) p.does = "harvest";
     else if (plot && plot.crop && !plot.watered) p.does = "water";
@@ -450,24 +443,27 @@ function act(state, p) {
         sleep(state);
         return;
     }
+    if (does === "cook") { const r = cook(state); state.events.push({ type: "cook", recipe: r.id, name: r.name, stamina: r.stamina }); return; }
+    if (does === "stove") { state.events.push({ type: "cant-cook" }); return; }
     let plot = state.plots.get(key(ix, iy));
     if (does === "till") {
-        plot = makePlot(ix, iy);
+        plot = makePlot(state.world, ix, iy);
         state.plots.set(key(ix, iy), plot);
     } else if (does === "plant") {
-        plot.crop = pouch.selected; plot.growth = 0; plot.watered = false; plot.days = 0;
+        // high crops need the cold up high; some won't grow down low (GDD §2)
+        if (!growsIn(pouch.selected, plot.band)) { state.events.push({ type: "wrong-band", crop: pouch.selected, band: plot.band, ix, iy }); return; }
+        plot.crop = pouch.selected; plot.growth = 0; plot.watered = false; plot.days = 0; plot.grew = false; plot.pollinated = false; plot.rained = false;
         pouch.seeds[pouch.selected]--;
         if (!pouch.seeds[pouch.selected]) { const next = CROP_IDS.find((c) => pouch.seeds[c] > 0); pouch.selected = next || ""; }
     } else if (does === "water") {
         plot.watered = true;
     } else if (does === "harvest") {
-        const c = CROPS[plot.crop];
-        pouch.crops[plot.crop] += c.yield;
-        // a ripe plant gives back a seed or two, so the farm can grow
-        pouch.seeds[plot.crop] += 1 + (((ix * 7 + iy * 13) & 1) === 0 ? 1 : 0);
-        if (!pouch.selected) pouch.selected = plot.crop;
-        state.events.push({ type: "harvest", crop: plot.crop, count: c.yield, ix, iy });
-        plot.crop = ""; plot.growth = 0; plot.watered = false; plot.days = 0;
+        const h = harvestOf(plot), crop = plot.crop;
+        pouch.crops[crop] += h.produce;
+        pouch.seeds[crop] += h.seeds;
+        if (!pouch.selected && h.seeds) pouch.selected = crop;
+        state.events.push({ type: "harvest", crop, count: h.produce, seeds: h.seeds, pollinated: plot.pollinated, ix, iy });
+        afterHarvest(plot);
         return;
     }
     state.events.push({ type: does, ix, iy, crop: plot.crop });
@@ -481,5 +477,6 @@ export function hashState(state) {
     for (const v of [state.tick, p.x, p.y, p.z, p.vx, p.vy, p.vz, p.mode, p.yaw, p.pitch, p.roll, p.speed, p.stamina]) mix(v);
     for (const plot of state.plots.values()) mix(plot.ix + plot.iy * 1000 + plot.crop + plot.growth + plot.watered);
     for (const c of CROP_IDS) mix(state.pouch.seeds[c] + "/" + state.pouch.crops[c]);
+    for (const s of state.sprites) mix(s.x + "," + s.y);
     return h >>> 0;
 }

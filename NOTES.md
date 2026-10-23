@@ -219,3 +219,52 @@ Findings to act on (honest):
 Views: 5 is now the Willow Pond waterfall, 6 the High Rocks from below; all twelve baselines re-locked (views 1–4
 changed by 6–26% because the rest of the world now shows behind them). `artifacts/stage3-sheet.jpg` (the six
 views), `artifacts/stage3-tour.jpg` (every island's landmark).
+
+## Stage 4: the farming loop
+
+Skills used: `survival-crafting` and `rpg` read for the crafting/economy shape (a few recipes with a clear
+payoff; balance by spreadsheet then by script), `game-ai` / `ai-behavior-trees-utility-ai` (the sprites'
+states: seek, hover, scattered, leave; steering by arrive), `procedural-gen` (seed caches and gardens placed
+from the world seed, validated against the islands' solids, ponds and trees), `threejs-procedural-vegetation`
+(crop stages as rooted parts), `save-systems` not yet (stage 8).
+
+What was built:
+
+- `game/data.js`: all 11 crops (GDD §4 table, as tuned), sprites, meals, weather.
+- `game/farm.js` (pure, used by the sim): growth while the soil is wet, faster in rain; night-only and
+  rain-dependent crops; the dawn credit for crops without special needs; regrowing bushes and fruit trees; the
+  seeded weather of every day (clear 46% / breezy 30% / rain 17% / storm 7% over 2000 days, no storm before day 4)
+  with a rain window that waters the plots; flower clusters (3+ blooms, 2+ hues, within 5 m), sprites that come to
+  them, hover, wander, scatter from a running player and pollinate (×1.5 at the next harvest); cooking.
+- `tools/make-world.mjs` now also places 22 seed caches (each band's own seeds) and 3 gardens (Willow Pond,
+  Apple Terraces, Frost Shelf), clear of solids, water, trees and each other.
+- The sim: plots know their island and band (a frost-mint at home is refused with a reason), the stove in the
+  hut cooks the best recipe the pouch can make, a meal adds to today's stamina.
+- `gfx/crops.js`: growth stages for every crop from four shared instanced meshes, night flowers and sprites that
+  glow (a new surface kind in the prop material), sparkles on ripe and pollinated crops. Rain falls round the
+  camera and the light dims under it (the full weather pass is stage 7).
+- HUD: every crop's name, the day's weather in the clock line ("rain at 11:00"), notices for the wrong band,
+  meals, the first sprite.
+
+Tests (`npm test`, all pass): weather frequencies; frost-mint and cloud-cotton refused at home; moon-bean 0% by
+day and growing at night; cloud-cotton stops at 67% through three dry days and is ripe two days after the rain;
+sprites arrive at a sunflower and berry garden and a pollinated turnip gives 3 instead of 2; a berry bush regrows
+to 35%; two turnips at the stove make soup (+15 s).
+
+Balance (`npm run economy`, new): single-crop farms of 6 plots for 20 days through the real rules. The first
+numbers failed the GDD's rule badly (median 9 coins/plot-day; berries +300%, frost-mint +260%, apples +206%,
+turnips +73%; moon-beans far too slow because the night is only 15% of a day). After tuning: 9.6–12.6 for every
+field crop, nothing more than 25% above the median, safe glide or greedy (fragile goods counted at 75%).
+Pollination raises any crop by 50–100%; storm-bloom (a storm-only rare find) is left out of the median.
+
+Changed from the GDD: cloud-cotton needs rain once in its last third rather than for the whole of it (measured: the
+strict rule took about two weeks per crop); the crop numbers above.
+
+Measured: CPU per frame about 0.9 ms rendering and 0.9 ms simulation (the scene graph's update over the streamed
+islands' entities is most of the latter). `npm run perf` Medium: 14.2–17.7 ms (hut door 17.7, up from 16.3 in
+stage 3 and over the 16.6 ms budget there; the run-to-run noise is about ±1.5 ms, but Medium is at its edge and
+the real tuning is stage 8's). The real-input playtest still passes; it reported 43 fps at the moment of landing
+on Daisy Step (92 in stage 3), during streaming builds; not investigated further yet.
+
+Not done here (later stages): selling (the merchant, stage 5), bridges needing the gardens' islands to be
+bridged first (stage 5), storm planting and the rain's look on soil and stone (stage 7), saving the farm (stage 8).

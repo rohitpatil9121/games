@@ -148,19 +148,26 @@ compromise. I'll measure Medium in stage 2 and drop the raymarched skin if it do
   upgrades, hermit stories, the map.
 - **Crops** (days are in-game days; value is merchant price in coins):
 
-  | Crop | Band | Days | Needs | Yield | Use | Value |
-  |---|---|---|---|---|---|---|
-  | Turnip | Meadow | 1 | – | 2 | food, sell | 6 |
-  | Rope-grass | Meadow | 2 | – | 3 fibre | rope (bridges) | 4 |
-  | Sunflower | Meadow | 2 | – | 1 + seeds | pollinator magnet | 8 |
-  | Moon-bean | Meadow (secret) | 1 | night | 3 | glows, sell | 14 |
-  | Berry bush | Orchard | 2, regrows | – | 4 | food | 5 |
-  | Sky pine | Orchard | 4 | – | 6 planks | planks (bridges) | 3 |
-  | Cloud-cotton | Orchard | 3 | rain to finish | 3 fibre | strong rope, sell | 12 |
-  | Apple tree | Orchard | 4, fruits every 2 | – | 5 apples (fragile) | food, sell | 10 |
-  | Frost-mint | High | 2 | above 400 m | 3 | best meals | 18 |
-  | Star-lily | High | 3 | rain or night | 1 (fragile) | sell, rare sprite | 60 |
-  | Storm-bloom | High | 1 | planted in a storm | 1 | storm-amber, sell | 40 |
+  *(Tuned in stage 4 by `tools/economy.mjs` so every field crop earns 9.6–12.6 coins per plot-day; the
+  first numbers had berries, apples and frost-mint at 2–4× the median. "Grows in" is which bands' gardens.)*
+
+  | Crop | Found in | Grows in | Days | Needs | Yield | Use | Value |
+  |---|---|---|---|---|---|---|---|
+  | Turnip | Meadow | Meadow, Orchard | 1 | – | 2 | food, soup | 4.5 |
+  | Rope-grass | Meadow | all | 2 | – | 3 fibre | rope (bridges) | 6 |
+  | Sunflower | Meadow | Meadow, Orchard | 2 | – | 2 | yellow flower (sprites) | 8 |
+  | Moon-bean | Meadow (Hollow Log) | Meadow | 0.3 of night | night only | 3 | blue flower, glows | 8 |
+  | Berry bush | Orchard | Meadow, Orchard | 2.5, regrows from 35% | – | 2 | pink flower, tart | 8 |
+  | Sky pine | Orchard | all | 4 | – | 6 planks | planks (bridges) | 6 |
+  | Cloud-cotton | Orchard | Orchard | 3 | rain once in its last third | 3 fibre | white flower, strong rope | 16 |
+  | Apple tree | Orchard | Meadow, Orchard | 4, fruits again from 50% | – | 5 (fragile) | white blossom, tart | 4.5 |
+  | Frost-mint | High | High (above 400 m) | 2 | – | 3 | mint tea | 7 |
+  | Star-lily | High | High | 1.5 | rain or night | 1 (fragile) | white flower, sells high | 60 |
+  | Storm-bloom | High (Storm Teeth) | High | 1 | planted in a storm (stage 7) | 1 | storm-amber | 40 |
+
+  Gardens away from home: Willow Pond (Meadow), Apple Terraces (Orchard), Frost Shelf (High), 7 × 5 m each.
+  Meals at the hut's stove: turnip soup (2 turnips, +15 s), berry tart (3 berries + 1 apple, +30 s), frost-mint
+  tea (2 frost-mint, +40 s), up to +60 s a day.
 
 - **Spend:** bridges (rope + planks + iron fittings bought from the merchant), merchant goods (bigger
   pouch, watering-can upgrade, cookware, lanterns, decorations), meals (crops). **Glider upgrades are not

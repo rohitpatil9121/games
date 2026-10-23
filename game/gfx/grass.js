@@ -1,5 +1,5 @@
 import { Entity, Geometry, InstancedMesh, ShaderMaterial } from "../../engine/index.js";
-import { topAt, inField, boxesAt } from "../islands.js";
+import { topAt, inField, gardenAt, boxesAt } from "../islands.js";
 import { header, vertexHeader, withShared, track } from "./common.js";
 import { fieldsAt, makeFields } from "./fields.js";
 import { makeRandom } from "../det.js";
@@ -160,6 +160,8 @@ export function* buildGrass(isl, world, quality = "medium", tint = [1, 1, 1]) {
     const tuft = tuftGeometry(isl.seed, GRASS.blades, GRASS.segments), flower = flowerGeometry();
     const blocked = (x, y) => {
         if (home && inField(world, Math.floor(x), Math.floor(y))) return true;
+        const g = gardenAt(world, Math.floor(x), Math.floor(y));
+        if (g && g.island === isl.id) return true;
         const h = d.hut, s = d.shed;
         if (home) {
             if (Math.abs(x - h.x) < h.w / 2 + 0.3 && Math.abs(y - h.y) < h.d / 2 + 0.3) return true;

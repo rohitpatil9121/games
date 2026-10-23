@@ -133,9 +133,53 @@ export const FARM = Object.freeze({
 /**
  * Crops (GDD §4). `days` is in-game days of watered growth to ripe; `stages` are the growth fractions where the
  * plant changes look (sprout, leafy, ripe). Unwatered crops pause, never die.
+ *   band      where its seeds are found;  grows: the bands whose gardens it grows in (high crops need the cold)
+ *   needs     "night": grows only at night · "rain": its last third grows only in rain · "rain-or-night"
+ *   regrow    after a harvest the plant goes back to this growth instead of being cleared (bushes, fruit trees)
+ *   flower    a flowering plant of this hue: what pollinator sprites look for (GDD §2)
+ *   fragile   lost, not washed up, if you fall into the clouds carrying it
+ *   yield/value per harvest and per unit (merchant coins, stage 5)
  */
+const crop = (o) => Object.freeze({ stages: [0.2, 0.5, 1], needs: "", regrow: 0, flower: "", fragile: false, ...o });
 export const CROPS = Object.freeze({
-    turnip: Object.freeze({ name: "Turnip", days: 1, yield: 2, value: 6, stages: [0.2, 0.5, 1], fragile: false }),
-    ropegrass: Object.freeze({ name: "Rope-grass", days: 2, yield: 3, value: 4, stages: [0.15, 0.5, 1], fragile: false }),
+    // tuned by tools/economy.mjs (stage 4) to about 12 coins per plot-day each; fragile goods are worth more per
+    // unit (the greed of gliding them home), not more per plot
+    turnip: crop({ name: "Turnip", band: "meadow", grows: ["meadow", "orchard"], days: 1, yield: 2, value: 4.5 }),
+    ropegrass: crop({ name: "Rope-grass", band: "meadow", grows: ["meadow", "orchard", "high"], days: 2, yield: 3, value: 6, stages: [0.15, 0.5, 1] }),
+    sunflower: crop({ name: "Sunflower", band: "meadow", grows: ["meadow", "orchard"], days: 2, yield: 2, value: 8, flower: "yellow" }),
+    moonbean: crop({ name: "Moon-bean", band: "meadow", grows: ["meadow"], days: 0.3, yield: 3, value: 8, needs: "night", flower: "blue" }),
+    berry: crop({ name: "Berry bush", band: "orchard", grows: ["meadow", "orchard"], days: 2.5, yield: 2, value: 8, regrow: 0.35, flower: "pink" }),
+    skypine: crop({ name: "Sky pine", band: "orchard", grows: ["meadow", "orchard", "high"], days: 4, yield: 6, value: 6, stages: [0.12, 0.45, 1] }),
+    cotton: crop({ name: "Cloud-cotton", band: "orchard", grows: ["orchard"], days: 3, yield: 3, value: 16, needs: "rain", flower: "white" }),
+    apple: crop({ name: "Apple tree", band: "orchard", grows: ["meadow", "orchard"], days: 4, yield: 5, value: 4.5, regrow: 0.5, fragile: true, stages: [0.12, 0.45, 1], flower: "white" }),
+    frostmint: crop({ name: "Frost-mint", band: "high", grows: ["high"], days: 2, yield: 3, value: 7 }),
+    starlily: crop({ name: "Star-lily", band: "high", grows: ["high"], days: 1.5, yield: 1, value: 60, needs: "rain-or-night", fragile: true, flower: "white" }),
+    stormbloom: crop({ name: "Storm-bloom", band: "high", grows: ["high"], days: 1, yield: 1, value: 40, flower: "violet" }),
 });
 export const CROP_IDS = Object.freeze(Object.keys(CROPS));
+
+/**
+ * Pollinator sprites (GDD §2): a garden's flowering plants form a cluster when 3 or more of at least 2 hues
+ * stand within `cluster` m of each other. Sprites seek clusters within `seek` m, hover there, and every crop
+ * within `reach` m of a hovering sprite is pollinated for the day: its next harvest yields `boost` times as much.
+ */
+export const SPRITES = Object.freeze({ cluster: 5, minFlowers: 3, minHues: 2, seek: 45, reach: 6, boost: 1.5, speed: 2.2, perCluster: 2, max: 12 });
+
+/** Meals (GDD §2): cooked at the hut's stove from the pouch; each adds to today's stamina (up to `maxBonus` s). */
+export const RECIPES = Object.freeze([
+    Object.freeze({ id: "mint-tea", name: "Frost-mint tea", needs: { frostmint: 2 }, stamina: 40 }),
+    Object.freeze({ id: "berry-tart", name: "Berry tart", needs: { berry: 3, apple: 1 }, stamina: 30 }),
+    Object.freeze({ id: "turnip-soup", name: "Turnip soup", needs: { turnip: 2 }, stamina: 15 }),
+]);
+export const MEALS = Object.freeze({ maxBonus: 60 });
+
+/** Weather per day (GDD §11), seeded: chances, and when in the day the rain falls */
+export const WEATHER = Object.freeze({
+    chance: { clear: 0.45, breezy: 0.3, rain: 0.18, storm: 0.07 },
+    /** no storms before this day */
+    stormFrom: 4,
+    /** rain falls between these fractions of the day (a seeded window inside them) */
+    rainWindow: [0.15, 0.85], rainLength: [0.25, 0.45],
+    /** crops grow this much faster while it rains (and rain waters them) */
+    rainGrowth: 1.5,
+});
