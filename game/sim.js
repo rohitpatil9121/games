@@ -24,7 +24,8 @@ import { sample, makeAir } from "./air.js";
 const MAX_PITCH = FLIGHT.maxPitch;
 
 /** the flight-path angle a fold glides at: tan = 1 / glide ratio */
-export const glideAngle = (fold) => datan2(1, FOLDS[fold].glide);
+const GLIDE = {};
+export const glideAngle = (fold) => GLIDE[fold] ?? (GLIDE[fold] = datan2(1, FOLDS[fold].glide));
 
 /** drag constant so that gliding at the fold's glide angle holds cruise speed */
 function dragK(f) {
@@ -101,8 +102,9 @@ const wrap = (a) => (a > PI ? a - TAU : a < -PI ? a + TAU : a);
  *        positive), buttons as BTN bits
  * @param {object} room
  * @param {number} seed the round's seed (gust timing)
+ * @param {boolean} [calm] fly through the air without its turbulence (bots' look-ahead only)
  */
-export function stepPlane(p, input, room, seed) {
+export function stepPlane(p, input, room, seed, calm = false) {
     p.events.length = 0;
     const t = p.clock * DT;
     p.clock++;
@@ -163,7 +165,7 @@ export function stepPlane(p, input, room, seed) {
     p.bump -= p.bump * FLIGHT.flapLiftFade * DT;
 
     // ---- the air
-    sample(room, seed, t, p.x, p.y, p.z, air);
+    sample(room, seed, t, p.x, p.y, p.z, air, calm);
     p.inFan = air.fan; p.inLift = air.lift; p.inGust = air.gust;
     const cy = dcos(p.yaw), sy = dsin(p.yaw);
     const wz = air.z > 0 ? air.z * f.thermal : air.z * f.wind;
@@ -211,32 +213,39 @@ const hit = { t: 1, nx: 0, ny: 0, nz: 0 };
  * Writes the face normal. Returns false if it doesn't, or starts inside.
  */
 function segBox(x, y, z, dx, dy, dz, b, r, out) {
-    let tin = -Infinity, tout = Infinity, axis = -1, sign = 0;
-    const o = [x, y, z], d = [dx, dy, dz];
-    for (let i = 0; i < 3; i++) {
-        const lo = b.min[i] - r, hi = b.max[i] + r;
-        if (d[i] === 0) { if (o[i] <= lo || o[i] >= hi) return false; continue; }
-        let t0 = (lo - o[i]) / d[i], t1 = (hi - o[i]) / d[i], s = -1;
-        if (t0 > t1) { const tmp = t0; t0 = t1; t1 = tmp; s = 1; }
-        if (t0 > tin) { tin = t0; axis = i; sign = s; }
-        if (t1 < tout) tout = t1;
-        if (tin > tout) return false;
-    }
-    if (tin < 0 || tin > out.t || axis < 0) return false;
+    const bn = b.min, bx = b.max;
+    const x0 = bn[0] - r, x1 = bx[0] + r, y0 = bn[1] - r, y1 = bx[1] + r, z0 = bn[2] - r, z1 = bx[2] + r;
+    // broad phase: the segment's own box misses the grown box (most boxes, most ticks)
+    if ((x < x0 && x + dx < x0) || (x > x1 && x + dx > x1) || (y < y0 && y + dy < y0) || (y > y1 && y + dy > y1) || (z < z0 && z + dz < z0) || (z > z1 && z + dz > z1)) return false;
+    slab.tin = -Infinity; slab.tout = Infinity; slab.axis = -1; slab.sign = 0;
+    if (!axisSlab(x, dx, x0, x1, 0) || !axisSlab(y, dy, y0, y1, 1) || !axisSlab(z, dz, z0, z1, 2)) return false;
+    const tin = slab.tin;
+    if (tin < 0 || tin > out.t || slab.axis < 0) return false;
+    const axis = slab.axis, sign = slab.sign;
     out.t = tin; out.nx = axis === 0 ? sign : 0; out.ny = axis === 1 ? sign : 0; out.nz = axis === 2 ? sign : 0;
     return true;
+}
+const slab = { tin: 0, tout: 0, axis: -1, sign: 0 };
+/** one axis of the slab test: narrows [tin, tout]; false when the segment can't be inside on this axis */
+function axisSlab(o, d, lo, hi, i) {
+    if (d === 0) return o > lo && o < hi;
+    let t0 = (lo - o) / d, t1 = (hi - o) / d, s = -1;
+    if (t0 > t1) { const tmp = t0; t0 = t1; t1 = tmp; s = 1; }
+    if (t0 > slab.tin) { slab.tin = t0; slab.axis = i; slab.sign = s; }
+    if (t1 < slab.tout) slab.tout = t1;
+    return slab.tin <= slab.tout;
 }
 
 /** the same for leaving the inside of the room's walls */
 function segShell(x, y, z, dx, dy, dz, s, r, out) {
-    const o = [x, y, z], d = [dx, dy, dz];
     let found = false;
     for (let i = 0; i < 3; i++) {
-        if (d[i] > 0) {
-            const t = (s.max[i] - r - o[i]) / d[i];
+        const o = i === 0 ? x : i === 1 ? y : z, d = i === 0 ? dx : i === 1 ? dy : dz;
+        if (d > 0) {
+            const t = (s.max[i] - r - o) / d;
             if (t >= 0 && t < out.t) { out.t = t; out.nx = i === 0 ? -1 : 0; out.ny = i === 1 ? -1 : 0; out.nz = i === 2 ? -1 : 0; found = true; }
-        } else if (d[i] < 0) {
-            const t = (s.min[i] + r - o[i]) / d[i];
+        } else if (d < 0) {
+            const t = (s.min[i] + r - o) / d;
             if (t >= 0 && t < out.t) { out.t = t; out.nx = i === 0 ? 1 : 0; out.ny = i === 1 ? 1 : 0; out.nz = i === 2 ? 1 : 0; found = true; }
         }
     }

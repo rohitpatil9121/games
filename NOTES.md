@@ -251,3 +251,69 @@ or server errors. Traffic with tag fields: 4.3 kB/s down for one client in a roo
 
 Not done yet: bots that play (stage 5: until then Practice "it" chases planes that fly hands-off and
 crash); sounds for the stamp, the eraser and "it is near" (stage 7); colour-blind ink colours (stage 8).
+
+## Stage 5: bots and a full offline match (`game-ai`, `ai-behavior-trees-utility-ai`)
+
+`game/bots.js`: a bot is a player whose input comes from code, through the same `steerToward` mouse-aim
+uses. Decision and motion are separate (`game-ai`):
+- Deciding: utility AI with TIDEFALL's structure (considerations through 0..1 curves, a 15% bonus for the
+  current choice). Chase (when "it"), flee (from the nearest "it", by distance and closing speed), eraser
+  (clean, normal and hard bots, less when "it" is near), climb (low on energy: ride the big thermal),
+  roam, and the next ring in Ring Run.
+- Flying, which is where reading the air happens: each decision the bot tries 15 aims (five headings
+  around the goal's, three pitches) by flying a copy of its own plane forward in the real simulation for
+  its look-ahead, and scores each run (crashing, grazing, losing energy, stalling, and the goal's term:
+  closeness to where the target is heading, distance from where "it" is heading, or closeness to the
+  goal). Fan, thermals and gusts are in every guess exactly as they will be; turbulence is left out of the
+  guesses (a bot can't foresee it any more than a person, and it was a third of the cost).
+- Fairness: a bot knows the planes it can see (a ray clear of furniture) and the one its HUD arrow would
+  point at, which a person has too. Same rules, same folds, no speed changes.
+- Skill changes reaction (0.45 / 0.25 / 0.12 s), look-ahead (0.5 / 0.8 / 1.2 s), aim noise and whether it
+  goes for erasers. A budget of 3 plans per server tick across all bots (TIDEFALL's field budget).
+- The Room's bot hook (stage 3) now gets these brains on the server and in Practice; the title screen
+  has a bot skill choice.
+
+Performance work found by profiling the bot matches (`--cpu-prof`): the swept collision built two small
+arrays per box per tick; it now has a broad phase (the segment's own box against the grown box) and no
+allocation. A plane step went from 1.34 to 0.89 µs; the outcomes of the same seeds didn't change. The
+glide angle is cached per fold.
+
+`tools/bot-match.mjs` (`npm run bots`): whole rounds through the real Room, 6 bots (two of each fold, the
+folds turning through the launch spots), reports by fold: wins, average rank (1 best, 6 worst: Classic by
+least time as "it", Ink Spread by most time clean; ties share), time as "it" or clean, tags and crumples
+per minute, erasers; then 3 easy against 3 hard bots; and the server tick.
+
+Balance, three runs:
+- First run (4 rounds): the glider was "it" 71 s a round against 12–15 s for the others: too slow to run
+  and too slow to catch, so it stayed "it". Glider cruise 0.8 → 0.95 m/s, max 1.7 → 1.8, flap 3.6 → 3.2 s.
+- Second run (6 rounds): the dart ranked best overall. Dart turn 150 → 135 °/s, flap 3.2 → 3.4 s, pushed
+  more by wind (0.6 → 0.7); stunt cruise 1.0 → 1.05 m/s, turbulence wobble 1.6 → 1.4.
+- Third run, fresh seeds (`ROUNDS=10 SEED=20000`, 46.7 minutes of play, bedroom only):
+
+  | Mode | Fold | Average rank | Time as "it" / clean | Tags/min | Crumples/min | Erasers |
+  |---|---|---|---|---|---|---|
+  | Classic | dart | 3.40 | 30.7 s | 0.25 | 1.47 | 46 |
+  | Classic | glider | 3.80 | 40.3 s | 0.89 | 1.44 | 48 |
+  | Classic | stunt | 3.30 | 27.1 s | 0.60 | 0.93 | 65 |
+  | Ink Spread | dart | 3.55 | 18.6 s | 0.49 | 1.38 | 1 |
+  | Ink Spread | glider | 3.60 | 22.9 s | 0.49 | 1.86 | 3 |
+  | Ink Spread | stunt | 3.35 | 23.0 s | 0.89 | 0.81 | 7 |
+
+  Share of wins: dart 33%, glider 27%, stunt 40%: 13 points between the most and least, over the GDD's
+  10. But that is 20 rounds' worth of wins, and the average ranks (which use every plane in every round,
+  not just the winner) sit within 0.4 of each other around the fair 3.5. I read this as "close, not
+  proven"; the classroom (stage 6) is the room the dart is meant to win, and the real check is both
+  rooms with more rounds. Glider is still the weakest at Classic in the bedroom.
+- Skill: the first run separated cleanly (hard bots' average rank 2.42 against easy 4.58, 5 rounds); the
+  third run on other seeds didn't (3.53 against 3.47, 5 rounds). Not settled; needs more rounds.
+- Ink Spread rounds are short in the bedroom (37 s on average): once two hunters exist, the room is too
+  small to hide in for long. In every one of 20 rounds one plane was left clean (none went to the clock).
+- Server tick, 6 normal bots: 0.84 ms average, 6.5 ms at the 99th percentile, one 132 ms outlier (the
+  machine was running other sessions' builds at the time; not reproduced).
+
+In the browser, a full offline Classic match against 5 normal bots: a bot tagged me 6 s in, the bots
+spread round the room and the thermal, my inked plane dripped ink and the arrow pointed at the nearest bot;
+40 s of play ran in 12.9 s of page time with rendering off. No console errors.
+
+What a human should try: whether a bot "it" feels fair and beatable, and whether the bots' habit of all
+going for the thermal top at once looks like a flock (it does a bit).

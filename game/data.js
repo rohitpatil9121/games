@@ -68,9 +68,9 @@ export const FLIGHT = Object.freeze({
  * bank and cruise speed, degrees per second. `wind`, `thermal` and `turbulence` scale how the air moves it.
  */
 export const FOLDS = Object.freeze({
-    dart: Object.freeze({ name: "Dart", cruise: 1.2, max: 2.3, glide: 4, stall: 0.675, turn: 150, flap: 3.2, wind: 0.6, thermal: 0.8, turbulence: 0.7, roll: 4.5 }),
-    glider: Object.freeze({ name: "Glider", cruise: 0.8, max: 1.7, glide: 9, stall: 0.4, turn: 130, flap: 3.6, wind: 1.3, thermal: 1.4, turbulence: 1.0, roll: 3.2 }),
-    stunt: Object.freeze({ name: "Stunt", cruise: 1, max: 1.95, glide: 6, stall: 0.525, turn: 220, flap: 2.4, wind: 1.0, thermal: 1.0, turbulence: 1.6, roll: 6.0 }),
+    dart: Object.freeze({ name: "Dart", cruise: 1.2, max: 2.3, glide: 4, stall: 0.675, turn: 135, flap: 3.4, wind: 0.7, thermal: 0.8, turbulence: 0.7, roll: 4.5 }),
+    glider: Object.freeze({ name: "Glider", cruise: 0.95, max: 1.8, glide: 9, stall: 0.45, turn: 130, flap: 3.2, wind: 1.3, thermal: 1.4, turbulence: 1.0, roll: 3.2 }),
+    stunt: Object.freeze({ name: "Stunt", cruise: 1.05, max: 1.95, glide: 6, stall: 0.525, turn: 220, flap: 2.4, wind: 1.0, thermal: 1.0, turbulence: 1.4, roll: 6.0 }),
 });
 export const FOLD_IDS = Object.freeze(["dart", "glider", "stunt"]);
 

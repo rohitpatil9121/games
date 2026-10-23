@@ -83,8 +83,9 @@ const _axis = [0, 0, 0];
  * @param {number} seed
  * @param {number} t seconds since the round began
  * @param {ReturnType<typeof makeAir>} out
+ * @param {boolean} [calm] leave out the turbulence (bots' look-ahead)
  */
-export function sample(room, seed, t, x, y, z, out) {
+export function sample(room, seed, t, x, y, z, out, calm = false) {
     let wx = 0, wy = 0, wz = 0, churn = 1, fan = 0, lift = 0, gust = 0;
     const srcs = room.air;
     for (let i = 0; i < srcs.length; i++) {
@@ -148,7 +149,9 @@ export function sample(room, seed, t, x, y, z, out) {
             if (p > gust) gust = p;
         }
     }
-    // turbulence everywhere, drifting slowly so the same spot changes
+    // turbulence everywhere, drifting slowly so the same spot changes (left out when `calm`: a bot guessing
+    // ahead can't know the gusts of turbulence either, and it's most of the cost)
+    if (calm) { out.tx = 0; out.ty = 0; out.tz = 0; out.x = wx; out.y = wy; out.z = wz; out.churn = churn; out.fan = fan; out.lift = lift; out.gust = gust; return out; }
     const sc = 1 / AIR.turbulenceScale, drift = t * AIR.turbulenceDrift * sc, amp = AIR.turbulence * churn;
     const nx = x * sc + drift, ny = y * sc, nz = z * sc;
     out.tx = noise(nx, ny, nz, 0) * amp;

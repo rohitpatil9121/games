@@ -67,7 +67,7 @@ let room = null;
 
 function startPractice() {
     leave();
-    room = new Room({ code: "PRACTICE", mode: $("p-mode").value, set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, seed: (Date.now() & 0xffffff) + 1, brains });
+    room = new Room({ code: "PRACTICE", mode: $("p-mode").value, set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: +$("p-skill").value, seed: (Date.now() & 0xffffff) + 1, brains });
     const link = new Conditions(new Loopback(room), conditions);
     link.settings = conditions;
     client.attach(link);
@@ -129,7 +129,7 @@ function playerName() { return cleanText($("name").value, NAME_MAX) || "Player";
     $("p-mode").addEventListener("change", () => { $("p-set").closest("label").hidden = $("p-mode").value !== "rings"; });
     $("practice").addEventListener("click", startPractice);
     $("quick").addEventListener("click", () => playOnline({}));
-    $("create").addEventListener("click", () => playOnline({ create: { mode: $("p-mode").value, set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: 2, open: true } }));
+    $("create").addEventListener("click", () => playOnline({ create: { mode: $("p-mode").value, set: +$("p-set").value, bots: +$("p-bots").value + 1, skill: +$("p-skill").value, open: true } }));
     const code = $("code");
     code.addEventListener("input", () => { code.value = code.value.toUpperCase().replace(/[^A-Z]/g, ""); });
     $("join-form").addEventListener("submit", (e) => { e.preventDefault(); if (code.value.length === 4 && online.up) playOnline({ room: code.value }); else code.focus(); });
