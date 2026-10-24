@@ -1,0 +1,29 @@
+{
+  "name": "skyfarm",
+  "private": true,
+  "type": "module",
+  "description": "SKYFARM: a cosy open-world sky-island farming game built on Projection Lab",
+  "scripts": {
+    "start": "node server/server.mjs",
+    "test": "node tools/test.mjs && node tools/check-world.mjs && node tools/economy.mjs",
+    "world": "node tools/make-world.mjs && node tools/check-world.mjs",
+    "playtest": "node tools/playtest.mjs",
+    "inspect": "node tools/inspect.mjs",
+    "views": "node tools/views.mjs",
+    "views:lock": "node tools/views.mjs --lock",
+    "perf": "node tools/perf.mjs",
+    "stream": "node tools/stream-test.mjs",
+    "economy": "node tools/economy.mjs",
+    "ui": "node tools/ui-test.mjs",
+    "fps": "node tools/fps.mjs",
+    "shots": "node tools/shots.mjs",
+    "mix": "node tools/sound-mix.mjs",
+    "itch": "node tools/build-itch.mjs",
+    "static": "node tools/serve.mjs 8160",
+    "test:net": "node tools/net-test.mjs",
+    "coop": "node tools/coop-test.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}

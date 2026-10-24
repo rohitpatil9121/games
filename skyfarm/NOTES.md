@@ -1,0 +1,548 @@
+# SKYFARM build notes
+
+Working log: the skills used for each stage, the three.js techniques ported to Projection Lab and how, and
+what was measured. Newest stage last.
+
+## Before starting
+
+- `threejs-game-director`: playable loop first, then the looks, then browser evidence; the premium bar is
+  the `threejs-aaa-graphics-builder` scorecard (no category below 2, average ≥ 2.3). Its credential probe:
+  `TRIPO_API_KEY`, `GEMINI_API_KEY`, `ELEVENLABS_API_KEY` all **MISSING**, so every model, texture and
+  sound is procedural.
+- `threejs-gameplay-systems` (design brief, core loop contract), `threejs-aaa-graphics-builder` (the
+  scorecard's categories, read for the art direction in GDD §0).
+- Engine: copied from TIDEFALL's folder (`engine/`, `shaders/`, `vendor/`), which is `projection_library-v2`
+  plus TIDEFALL's `Audio.js` that can also load recorded files. Z is up; GLSL ES 1.00; no gamma pipeline.
+
+## Stage 1: prototype (`prototype-fast`)
+
+Brief, as the skill asks:
+
+- QUESTION: is "glide over to the next island, find a seed, come home and watch it grow" pleasant?
+- CORE VERB: glide (with walking, planting and watering as the rest of the loop).
+- THROWAWAY?: the greybox drawing (`world.js`), the stage-1 HUD in `main.js` and `index.html`. Kept and
+  written to grow: `sim.js`, `islands.js` (the queries; the two islands become data in stage 3), `air.js`,
+  `data.js`, `pilot.js`, `det.js`. They are pure and deterministic from the first line because tests, tools
+  and later co-op need them that way.
+- KEEP IF: the first loop fits in the first five minutes with no text, the glide to the next island lands
+  where it aims with hands off the stick, and the way back needs one thermal (a small skill, not a wall).
+- KILL IF: the glide is either trivial (no air to read) or a wall (needs precision to land).
+
+What was built:
+
+- `islands.js`: an island is a few numbers. The outline is the radius wobbled by three seeded sine terms
+  around the circle; the top a value-noise plateau rounded over at the rim, with flat pads for the hut and
+  the field; the underside a rough hanging cone. Rock is everything between, so the same function answers
+  "where is the ground", "am I in rock" and the camera's ray.
+- `air.js`: PAPER PLANES' thermal and turbulence lattice at world scale, plus a new wind current (a tube of
+  moving air between two points). Pure function of position and time.
+- `sim.js`: TIDEFALL's ground movement; PAPER PLANES' flight model at person scale (heading, path angle,
+  bank, airspeed; drag chosen so the glide angle holds cruise; bank costs energy; stall drops the nose; the
+  air carries the glider); stamina; landing and bumping off cliffs; falling into the clouds wakes you at
+  home; 1 m plots with one context action; growth by watered time and by dawns; sleep.
+- `pilot.js`: a test pilot that plays through the same inputs as a person, for the tools and screenshots.
+- `world.js`: greybox scene (islands, hut, shed, stones, plots and crops instanced, the player and the
+  glider wing, pollen up the thermals and streaks along the current, a simple sky and cloud sea).
+
+Measured (`npm test`, the pilot playing the first loop with real inputs in Node):
+
+| Step | Time |
+|---|---|
+| seed picked up | 0.8 s |
+| planted, watered | 3.4 s, 3.7 s |
+| first glide starts | 13.2 s |
+| glide 1: Hearth Isle → Daisy Step | 8.9 s, 121 m, z 58.7 → 46.0, hands off (current carries it), lands on the island |
+| glide 2: Daisy Step → thermal → home | 75.8 s, 177 m, climbs 44.7 → 99.0 in the thermal, lands at home with 29 s of stamina left |
+| whole loop (pilot) | 104 s; a person will take 3–5 minutes |
+| turnip sprouts | 243.7 s (inside the five-minute target), ripe the next morning |
+
+Other checks: the same inputs give the same game (hash); six minutes of random input never leave the
+player inside rock or a wall.
+
+Bugs found by the tools and fixed:
+
+- the pilot couldn't circle in a 10 m thermal: at cruise and full bank the turn radius is about 10.5 m.
+  Thermals are now 18 m (GDD §2 updated). The climb went from 213 s to 18 s.
+- a one-day turnip planted after sunrise was only 97% grown at dawn and then stopped (unwatered). Dawn
+  now counts the whole watered day (GDD §2 updated).
+- the island's top faced down (wound clockwise seen from above), so it was culled and the cloud sea showed
+  through it.
+- the HUD read the seed after the last one was planted (aim now runs again after an action).
+
+Changed from the GDD: seeds stay in the pouch when you fall (losing your only seed for a day in the first
+five minutes would teach the wrong thing).
+
+Through real input (`npm run playtest`: headless Chrome on the GPU, in real time, keys pressed through the
+engine's Input, steering from what's on screen): seed 0.8 s, planted 3.1 s, watered 3.3 s, glider 6.0 s,
+glider opened 9.9 s, landed on Daisy Step 18.9 s, rope-grass seeds 20.4 s. No console errors.
+
+Frame (`npm run inspect`, 1280×720, Intel UHD, greybox): 12 draw calls, 10–12 shadow draws, about 9,300
+triangles; GPU-synced median 0.1–0.9 ms, worst 1.9–3.7 ms. These timings are not trustworthy on this
+machine (gl.finish() on ANGLE/D3D11, see the engine's ARCHITECTURE §9.2); the counts are.
+
+Honest verdict: **keep.** The loop fits the first five minutes with no text, the first glide lands with hands
+off (the current carries it), and the way back needs one thermal climb, which is a small skill rather than a
+wall. What I can't judge is the feel, only the numbers; a person should try it. Risks seen:
+
+- the first glide is short (9 s): pleasant as a first taste, but the next ones must be longer and need the
+  air read, or gliding will feel like a bridge with extra steps;
+- the hut is cramped for the camera (6 × 5 m); it grows in stage 2;
+- the engine's camera has no roll, so the glide camera can't lean into turns yet. Proposal for stage 2: add
+  an optional roll to `Camera` (rotate right and up around forward), which every game would get;
+- golden hour mixes a blue and an orange horizon into grey: the stage-2 sky must take its colours from the
+  sun's height, not from a lerp between keys.
+
+## Stage 2: look target (one island to final quality)
+
+Skills read and used: `threejs-skill-router` (route by visual system; a no-post baseline that still reads;
+deterministic inputs), `threejs-atmosphere-aerial-perspective`, `threejs-volumetric-clouds`,
+`threejs-procedural-vegetation`, `threejs-exposure-color-grading`, `threejs-visual-validation`,
+`threejs-procedural-fields`, `threejs-procedural-geometry` / `-architecture` (by their rules), and the
+`threejs-aaa-graphics-builder` scorecard. All of them target three.js (most WebGPU/TSL); each technique below
+was rewritten as GLSL ES 1.00 for Projection Lab's `ShaderMaterial` and `PostFX`. No three.js anywhere.
+
+What was ported, and how (`game/gfx/`):
+
+| Technique (skill) | In SKYFARM |
+|---|---|
+| Sky and aerial perspective share one scattering model (atmosphere) | `atmosphere.js`: Rayleigh + Mie + ozone with Earth's coefficients, analytic optical depth through exponential density (no LUTs: the "small scene" tier). One explicit scale (atmosphere m = world m × 8). The same maths in JS gives the sun's colour, the sky light and the bounce, so lighting and haze can't disagree. Tuned in Node with `tools/atmo-tune.mjs` against the palette (noon horizon #e4ebf1 vs the target #e8f6ff). |
+| Cloud density organised by layer, per-layer wind, lit by the same sun (volumetric clouds) | `clouds.js`: **not raymarched** (see below). Cloud sea: a camera-following polar grid displaced by billow noise in world space, soft wrap light, blue hollows, silver rims, island shadows cast analytically along the sun. Cumulus: sphere clusters with flat bases and "volume normals". |
+| Rooted wind with gust fronts, blade clusters, clumps, distance tiers (vegetation) | `grass.js`: 7-blade tufts per 8 m chunk from the fields; gust fronts that travel along the wind; the player's feet push grass aside; colour root → tip; translucency; mostly the ground's normal (a meadow lights as one surface); instance counts thinned by distance. Flowers share the shader. |
+| Growth hierarchy, queue, stratified children, parallel-transport rings, crown-volume foliage normals, rooted card wind (vegetation) | `tree.js`: a 3-level oak species table, flared roots, lumpy leaf masses plus alpha-tested leaf cards that flutter about their root, whole-tree sway as a separate scope; bark measured in metres. |
+| One field drives several channels (fields) | `fields.js`: meadow, wear (paths), flowers, hue, edge; they bake the ground colour and decide where grass and flowers grow and how tall. |
+| Exposure → one tone map → LUT grade (grading) | Engine `PostFX.lut` (new, a 32-cube LUT as a 1024×32 strip after ACES); `grade.js` builds it from named moves (cool lift, warm highlights, mid-saturation "vivid" that never goes neon, a soft S). Exposure key from the light model, eased (faster up than down). |
+| Fixed views, no-post baseline, numeric comparison (validation) | `tools/views.mjs`: 6 views × noon/golden, contact sheets, canvas metrics, a 640×360 baseline diff. Re-running gives a mean difference of 0.5–0.6 / 255 and under 0.1% changed pixels, so a real change will show. |
+
+Engine changes (in this game's copy, to hand back to Projection Lab): `Camera.roll` (the glide camera leans
+10° at full bank, 3° with reduced roll, none with reduce motion) and `PostFX.lut` / `lutAmount`.
+
+Measured (`npm run perf`, this laptop's Intel UHD, headless Chrome, 1280×720, GPU-synced by readPixels after
+40 frames):
+
+| Tier | Hut door | Grass close-up | Home wide (golden) |
+|---|---|---|---|
+| Low (960×540) | 11.5 ms | 11.2 ms | 11.4 ms |
+| Medium | 14.2 ms | 14.5 ms | 11.4 ms |
+| High | 12.9 ms | 12.9 ms | 10.3 ms |
+
+Medium is inside the 16.6 ms budget with clouds, grass, haze and shadows on: 48 draws + 18 shadow draws,
+up to 500k triangles. The numbers move by about ±1.5 ms from run to run (High measuring under Medium is that
+noise). The CPU side of a frame is 0.09 ms. Ablation (`npm run perf -- --ablate`): no single system dominates;
+shadows ~0.5–3.3 ms, post ~0.6–2.3 ms, grass ~0.5–1.7 ms, the rest under 1 ms each.
+
+Honest notes:
+
+- **Volumetric clouds are not raymarched.** The skill's path (weather field, bounded march, temporal
+  reconstruction) would cost several milliseconds here even at quarter resolution, and the whole frame is
+  already 10–14 ms. The mesh clouds read as painted Ghibli clouds; the GDD's optional Medium raymarched skin
+  is dropped unless you want it measured.
+- **Low is not cheaper yet.** It renders at 0.75 resolution with one smaller shadow cascade and less grass,
+  and still costs ~11 ms, so the floor isn't fill rate. Tiers get their real tuning in stage 8 (also on a phone).
+- **Not the money shots yet:** the player is still a capsule with a scarf (the img2threejs character comes
+  with the hermits in stage 6); the HUD is stage 1's; no waterfall, water or rain.
+- Views 5 and 6 are stand-ins until stage 3 (GDD §0).
+
+Scorecard (`threejs-aaa-graphics-builder`, genre equivalents: Hero = the gardener and the glider; Obstacles = the
+air and the cliffs; Interactables = seeds, crops, plots; scored from the stage-2 sheets, the canvas metrics
+above and the renderer counts):
+
+| Category | Score | Why |
+|---|---|---|
+| Art direction | 2.5 | one palette and mood through sky, clouds, grass, roofs, rock and grade; golden hour and noon both on-model |
+| Hero / player | 1 | the glider wing is authored; the gardener is a primitive capsule (an automatic failure until stage 6) |
+| Obstacles (air, cliffs) | 1.5 | thermals and the current are visible as pollen and streaks; no storm or gust telegraphs yet |
+| Rewards / interactables | 1.5 | seeds glint, crops show stages, the tile cursor; crops are still simple shapes |
+| World / environment | 2.5 | foreground grass and flowers, a hut, fence, windmill, tree and rocks, the next island and cumulus behind, the cloud sea to the horizon |
+| Materials / textures | 2 | a shared material language (plaster, timber grain, tiles, stone courses, strata, bark, moss) |
+| Lighting / render | 2.5 | one atmosphere for sky and haze, shadows, a graded and exposed final image, a no-post baseline that reads |
+| VFX / motion | 2 | gusts across the meadow, breathing clouds, chimney smoke, motes, pollen, the tree swaying |
+| UI / HUD | 1 | stage 1's minimal HUD (stage 8) |
+| Performance evidence | 2 | per-tier GPU-synced timings, ablation, counts, budget notes |
+
+Average 1.85: not premium yet (needs 2.3, nothing below 2). The environment and light are at the bar; the
+hero, the interactables and the HUD are what hold it down, and they are later stages' work.
+
+## Stage 3: world and streaming
+
+Skills used: `procedural-gen` (one seeded generator, validation before use), `level-design` (routes, sightlines,
+landmarks), `threejs-procedural-fields` (bare-rock field for the High Rocks), `threejs-procedural-vegetation` (apple
+and pine species; growth split into steps), `threejs-water-optics` (analytic ripples, Fresnel sky reflection, bank
+foam; a falling ribbon for the waterfall), `threejs-performance` / `performance-optimization` (tiers, budgets,
+measuring), `threejs-visual-validation` (views 5 and 6 re-pointed and every baseline re-locked).
+
+What was built:
+
+- `tools/make-world.mjs` → `game/world-data.js`: the 20 islands of GDD §5 from a skeleton (band, place, size,
+  landmark), seeded detail (offsets, seeds, hills, depth, trees, a thermal off each island's south rim) and
+  hand-tuned overrides (Hearth Isle and Daisy Step exactly as stage 1; two gate updrafts; 13 wind currents along
+  the routes). 20 thermals, 13 currents, 52 trees.
+- `game/landmarks.js`: every landmark as shape descriptors, one source of truth: the simulation boxes the solid
+  ones (collision, in a 32 m grid), the renderer draws them all (`gfx/landmarks.js`).
+- Ponds and streams are dug into `topAt` (capsules), so walking, grass and water agree.
+- `gfx/stream.js`: three tiers per island (far: always built, a 22% mesh and a coarse landmark; mid within
+  560 m: half mesh, landmark, trees, water, Hearth's buildings; near within 230 m: full mesh, grass, flowers),
+  hysteresis on drop (760 m / 320 m), jobs as generators under a 3 ms/frame budget, GPU buffers freed on drop,
+  shadows only within 160 m.
+- `tools/check-world.mjs` (in `npm test`): overlaps, reachability by the real glide sim per glider tier, and
+  landmark sightlines along the routes.
+
+Measured:
+
+- `npm run perf` (Intel UHD, 1280×720): Low 12.4–13.1 ms, Medium 14.5–16.3 ms, High 15.0–17.2 ms. Medium is inside
+  16.6 ms, with little margin (stage 2 was 10–14 ms; the rest of the world is now in view: 96 draws + 22 shadow
+  draws, up to 540k triangles at the hut door, of which ~460k is grass). The fixes that got it there: mid tier
+  1100 → 560 m, shadows only near (106 → 22 shadow draws), cumulus balls 16×11 → 10×7, grass tiers 28/62 →
+  20/46 m on Medium, leaf masses 9×14 → 7×11, the rock bump only within 90 m.
+- `tools/stream-test.mjs` (a 5.4 km flight over every band at 45 m/s, four times glide speed, real
+  requestAnimationFrame): the first run, before the budget fixes above, gave load to first frame 756 ms, 78 files,
+  767 KB; median frame 13.9 ms, 99th percentile 23.8 ms, worst 62.5 ms, 4 of 9,217 frames over 33 ms; islands'
+  geometry 19–34 MB as tiers come and go, JS heap 46–91 MB with no growth over the flight. Later runs on the same
+  machine were much noisier (load 4–7 s, medians 15–21 ms) while the scene was at its heaviest; the run after the
+  last fixes was not done, so that's the number still to confirm.
+- The longest single build step found was the Crown's 42 m tree (24.6 ms in one step). Tree growth now yields
+  every 6 branches and every 4 leaf masses. A near terrain mesh (~6,000 vertices, fields per vertex) is still one
+  step and can take tens of milliseconds on a busy machine: the next thing to split if hitches show in play.
+- `npm test`: everything passes; the first-loop pilot, the stress run and the real-input playtest are unchanged.
+
+Findings to act on (honest):
+
+- **The glider tiers don't gate anything yet.** Every tier reaches all 20 islands, because climbing in a
+  thermal costs no stamina and the thermals reach high enough to cross each band. Progression must come from the
+  gates (the Meadow and Orchard gate updrafts only rise once their island is restored, stage 5) and from making
+  long climbs cost something (a slow stamina drain even in lift, or stronger sink between islands). Stage 5 will
+  re-run the checker with that rule and tune it until the tiers separate.
+- Islands still read alike in shape (all round loaves over cones); their landmarks and band colours tell them
+  apart. More shape variety (twin rocks, terraces, long ridges) would help the far silhouettes.
+- The Crown's giant tree is one big round crown: it needs its own species before the ending (stage 6).
+- Windmill sails, kites and the bell-tower wheel don't move yet (restoration, stage 5).
+
+Views: 5 is now the Willow Pond waterfall, 6 the High Rocks from below; all twelve baselines re-locked (views 1–4
+changed by 6–26% because the rest of the world now shows behind them). `artifacts/stage3-sheet.jpg` (the six
+views), `artifacts/stage3-tour.jpg` (every island's landmark).
+
+## Stage 4: the farming loop
+
+Skills used: `survival-crafting` and `rpg` read for the crafting/economy shape (a few recipes with a clear
+payoff; balance by spreadsheet then by script), `game-ai` / `ai-behavior-trees-utility-ai` (the sprites'
+states: seek, hover, scattered, leave; steering by arrive), `procedural-gen` (seed caches and gardens placed
+from the world seed, validated against the islands' solids, ponds and trees), `threejs-procedural-vegetation`
+(crop stages as rooted parts), `save-systems` not yet (stage 8).
+
+What was built:
+
+- `game/data.js`: all 11 crops (GDD §4 table, as tuned), sprites, meals, weather.
+- `game/farm.js` (pure, used by the sim): growth while the soil is wet, faster in rain; night-only and
+  rain-dependent crops; the dawn credit for crops without special needs; regrowing bushes and fruit trees; the
+  seeded weather of every day (clear 46% / breezy 30% / rain 17% / storm 7% over 2000 days, no storm before day 4)
+  with a rain window that waters the plots; flower clusters (3+ blooms, 2+ hues, within 5 m), sprites that come to
+  them, hover, wander, scatter from a running player and pollinate (×1.5 at the next harvest); cooking.
+- `tools/make-world.mjs` now also places 22 seed caches (each band's own seeds) and 3 gardens (Willow Pond,
+  Apple Terraces, Frost Shelf), clear of solids, water, trees and each other.
+- The sim: plots know their island and band (a frost-mint at home is refused with a reason), the stove in the
+  hut cooks the best recipe the pouch can make, a meal adds to today's stamina.
+- `gfx/crops.js`: growth stages for every crop from four shared instanced meshes, night flowers and sprites that
+  glow (a new surface kind in the prop material), sparkles on ripe and pollinated crops. Rain falls round the
+  camera and the light dims under it (the full weather pass is stage 7).
+- HUD: every crop's name, the day's weather in the clock line ("rain at 11:00"), notices for the wrong band,
+  meals, the first sprite.
+
+Tests (`npm test`, all pass): weather frequencies; frost-mint and cloud-cotton refused at home; moon-bean 0% by
+day and growing at night; cloud-cotton stops at 67% through three dry days and is ripe two days after the rain;
+sprites arrive at a sunflower and berry garden and a pollinated turnip gives 3 instead of 2; a berry bush regrows
+to 35%; two turnips at the stove make soup (+15 s).
+
+Balance (`npm run economy`, new): single-crop farms of 6 plots for 20 days through the real rules. The first
+numbers failed the GDD's rule badly (median 9 coins/plot-day; berries +300%, frost-mint +260%, apples +206%,
+turnips +73%; moon-beans far too slow because the night is only 15% of a day). After tuning: 9.6–12.6 for every
+field crop, nothing more than 25% above the median, safe glide or greedy (fragile goods counted at 75%).
+Pollination raises any crop by 50–100%; storm-bloom (a storm-only rare find) is left out of the median.
+
+Changed from the GDD: cloud-cotton needs rain once in its last third rather than for the whole of it (measured: the
+strict rule took about two weeks per crop); the crop numbers above.
+
+Measured: CPU per frame about 0.9 ms rendering and 0.9 ms simulation (the scene graph's update over the streamed
+islands' entities is most of the latter). `npm run perf` Medium: 14.2–17.7 ms (hut door 17.7, up from 16.3 in
+stage 3 and over the 16.6 ms budget there; the run-to-run noise is about ±1.5 ms, but Medium is at its edge and
+the real tuning is stage 8's). The real-input playtest still passes; it reported 43 fps at the moment of landing
+on Daisy Step (92 in stage 3), during streaming builds; not investigated further yet.
+
+Not done here (later stages): selling (the merchant, stage 5), bridges needing the gardens' islands to be
+bridged first (stage 5), storm planting and the rain's look on soil and stone (stage 7), saving the farm (stage 8).
+
+## Stage 5: bridges, restoration, upgrades, the merchant
+
+Skills used: `level-design` (gating by gates and tiers, checked rather than assumed), `game-feel` (the bridge
+going up plank by plank, restoration easing in), `threejs-procedural-architecture` / `-geometry` (rope bridges,
+the airship, Captain Bram), `game-ui-ux` (the trade panel), `procedural-gen` (anchors, hearts and material caches
+placed by the generator).
+
+What was built:
+
+- `game/progression.js` (pure): 12 bridges with costs from their span (rope from rope-grass and cloud-cotton,
+  planks from sky pine or bought, iron fittings bought), built at either broken end once paid, going up over 4 s;
+  walkable decks with sag and rails; restoration (by bridge, or by waking a heart stone where no bridge goes);
+  gates (the Old Mill's and the Orchard Gate's updrafts blow only once restored); the airship's schedule (every
+  second day from day 2, moored off Hearth Isle 08:30–16:30); selling at each crop's value, buying fittings (8)
+  and planks (5); the workbench upgrades (sky-silk → 11:1 / 90 s, frost-glass → 13:1 / 120 s, storm-amber → the
+  gust boost, Shift in the air).
+- World data: bridge anchors on the islands' rims, heart stones, the three rare materials, the mooring.
+- Visuals: rope bridges (broken stubs hanging into the clouds; built ones drawn as a prefix while the planks go
+  down), parched islands that green over four seconds when restored (terrain and grass, per island), the Old
+  Mill's sails turning, Willow Pond's waterfall and pond only when restored, glowing heart stones, the airship
+  flying in and out and Captain Bram at the gangway.
+- HUD: coins, rope, planks, fittings and when the airship comes; prompts for every new action; the trade panel.
+
+The design problem from stage 3, fixed and measured (`tools/check-world.mjs`): climbing in lift was free, so the
+first glider reached all twenty islands. A sweep of the lift drain (0.3 / 0.6 / 1.0 per s) and a cold factor
+above 400 m (1.5 / 1.8): at 0.6 and 1.8 every rule holds: the first glider reaches the Meadow and none of the
+Orchard; the Meadow gate opens the Orchard as far as Kite Cliffs (sky-silk) but not all of it; sky-silk reaches
+all the Orchard and Glass Lake but only 2 of the 6 High Rocks; frost-glass reaches everything. The lift drain
+made the first loop's way home end on 0 s of stamina, so climbing stays free below 150 m (the Meadow): back to
+23 s to spare.
+
+Balance (`npm run economy`): the road to the ending. Bridges first cost one rope and one plank per 8 m and a
+fitting per 25 m (281 / 281 / 94); with the farm growing as GDD §4 plans, the gates came on day 20 and all twelve
+bridges on day 26. Two fixes: costs per 10 m and 30 m (227 / 227 / 80), and the model plans for all remaining
+bridges rather than one at a time (it had idled plots). Now: both gate bridges by day 14 and all twelve by day 18
+without pollinators, 12 and 14 with them, against the GDD's 14–16.
+
+Tests (`npm test`, all pass): the bridge asks for what it's missing; paid for, it goes up and restores Daisy
+Step; mid-span the feet stay on the deck and walking into the rail keeps you on; the 109 m bridge walked end to
+end; the Old Mill's restoration turns its updraft on; Hollow Log's heart; the airship's mooring, selling and
+buying; sky-silk at the workbench.
+
+Not done or not checked:
+
+- Storm-amber lies on Storm Teeth all the time; it should only appear during storms (stage 7).
+- The airship never moors at the Merchant Dock; the dock is scenery for now.
+- Bram has no dialogue yet (stage 6); the trade panel is the whole conversation.
+- A person hasn't tried building a bridge, the trade panel or the gust boost; the playtest only covers the first
+  loop. Frame time was not re-measured this stage (12 bridge meshes and the airship add up to 14 draws).
+
+## Stage 6: people, creatures, the ending
+
+Skills used: `dialogue-systems` (the custom-runner path: a graph as data with line IDs into a string table,
+conditions and effects as short strings, every branch walked by a test), `game-ai` and
+`ai-behavior-trees-utility-ai` (utility scoring with considerations and stickiness for the fluffballs; steering
+for all three kinds), `img2threejs` (its staged method, blockout → structure → form → material, with a written
+spec per character; **without a reference image**, which this pipeline can't have, so the characters are
+designed, not reconstructed), `disney-animation-rule-skill` (overlap: arms a beat behind legs; follow-through: the
+head settles after the body; secondary action: breathing, weight shift, talking hands).
+
+What was built:
+
+- `game/dialogue.js`: 20 entries for Ona, Pell, Mabel, Tor, Iris, Captain Bram and the Crown; gifts of seeds, the
+  three Old Seeds behind world conditions (the Old Mill restored, sprites seen, the Orchard Gate restored).
+- The sim: talking (near a hermit, Bram before trading, the Crown), `finishTalk` applies a conversation's gifts;
+  the ending (three Old Seeds at the Crown) wakes the great tree and restores every island.
+- `gfx/characters.js`: a character kit (five joints: body, head, two arms, two legs) and a cast of seven: the
+  gardener (straw hat, red scarf, satchel), Ona (shawl, bun), Pell (goggles, long scarf), Mabel (bee hat, apron),
+  Tor (beard, fur cap, cane), Iris (long hair, glasses, a robe with glowing stars, a lantern), Bram (captain's cap,
+  white beard). Procedural idle, walk, glide and talk poses; heads turn toward a player who comes near.
+- `gfx/creatures.js`: fluffballs (graze, wander, curious, flee, follow if you carry turnips, nap at night,
+  huddle in rain), birds circling every thermal and flying alongside a nearby glider, fish that dart from a
+  shadow at the pond's edge and gather near someone standing still.
+- The ending: the camera circles the Crown for 14 s while the great tree (its own wide-crowned species) blossoms
+  pink and petals blow off it, then a card, then free play.
+- Dialogue box and ending card in the UI.
+
+Changed: the sun's arc moved 0.08 of a day earlier, so waking at 06:30 is a golden morning instead of a dark
+one with stars (seen in a screenshot of the first conversation); every baseline re-locked for it.
+
+Tests (`npm test`, all pass): every line written and every entry reachable; Ona's, Mabel's and Iris's seeds
+arrive only once their conditions hold; the three seeds at the Crown end the game and green all 20 islands;
+without them the Crown only says what it's waiting for.
+
+Measured: shadow casters had grown to 66–72 draws (bridge stubs, birds, hearts, far bridges); now only near
+bridges, the people and the fluffballs cast: 34–40. `npm run perf` Medium in two runs this stage: hut door 12.9
+and 18.0 ms, grass 11.2 and 14.0, wide 19.7 and 11.2. Run-to-run noise on this machine is now about ±4 ms, too
+wide to call the budget met or missed; stage 8 has to measure with many runs and a median. The real-input
+playtest: 62 fps at the end of the first loop.
+
+Not done: the characters have no walk cycle for hermits (they stand), the fluffballs' legs don't step, nobody has
+tried a conversation or the ending by hand, the ending's music and sound come with the audio pass (stage 7).
+
+## Stage 7: day, night, weather, audio
+
+Skills used: `threejs-precipitation-surfaces` (one shared weather envelope for every surface: wetness that
+rises in rain and dries after, puddles in low flat places, a camera-relative box of rain streaks that wraps),
+`audio-design` (buses and ducking, loudness checked by number, captions for every cue that matters, spatial
+placement), `threejs-atmosphere-aerial-perspective` (the storm greys the same sky model, it doesn't paint over
+it), `threejs-exposure-color-grading` (the eye doesn't fully adapt to a storm or to night).
+
+What was built:
+
+- `game/weather.js` (pure, deterministic): a storm's strength rises over 0.12 of a day (2.2 in-game hours)
+  before its rain, is full in it, fades after. While it blows, one seeded gust per 9 s: a 1 s swell you hear
+  first, 3 s of push (6–13 m/s sideways and a 3.2 m/s downdraft), then calm. Gusts act only on a glider.
+- The sim: storm-bloom takes only if sown in a storm (and says why otherwise); storm-amber appears only while one
+  blows.
+- Surfaces: every painted surface darkens a little when wet and gets a sky-and-sun sheen on what faces up; puddles
+  fill on flat ground, rippled by rings, reflecting the sky.
+- Sky: a storm drains the blue toward slate (rain too, less), cumulus darken from the base and tower 28 m, the
+  cloud sea goes grey, sky light and exposure drop, shadows go faint under cloud.
+- Lightning in a storm's rain: a flash that lights everything (`u_flash`), its thunder arriving at 343 m/s.
+  Before the rain, thunder far off with no flash.
+- Night: lit windows (a new surface kind), fireflies over restored grass, night exposure capped lower.
+- `gfx/rain.js`: 5 000 streaks in a 40 × 40 × 26 m box round the camera, wrapped in the vertex shader,
+  stretched along their fall and slanted by the wind; a shower uses about half, a storm all of them. Replaces
+  the point particles, which read as dots. Splashes on the island under the camera.
+- `game/sound.js`: buses (sfx, ui, ambience, music through its own conversation duck, then a duck bus; horn and
+  thunder on a bus that is never ducked), a limiter last. Wind from speed and height, with a whistle at speed and
+  a gust's swell; rain hiss and storm roar; birds per band (Meadow warblers, Orchard two-note calls, a falling cry
+  on the High Rocks), crickets at night on restored islands; thunder; the airship's horn from where the airship
+  is; a breath every 2 s when stamina is under a quarter. The score: piano and strings at 68 bpm in F major
+  pentatonic (D minor in a storm), layers for home, gliding, night and storm crossfading over seconds, everything
+  for the ending.
+- Captions (`#caption`) for: a storm building, rain starting, a gust coming and hitting, thunder near and far, the
+  airship's horn, a sprite arriving, breathing hard. HUD notice when a storm starts to build.
+- Kenney CC0 sound files copied from TIDEFALL's folder (nothing downloaded); `THIRD_PARTY.md` written.
+- Tools: `tools/sound-mix.mjs` (the mix per situation, RMS and peak from the master bus); views capture a third
+  time, rain, for every view (`skyfarm.weather("rain" | "storm" | "dry")`); perf has a storm view.
+
+Tests (`npm test`, all pass): the day-9 storm builds for 2.2 in-game hours and calm days have none; 10 gusts in
+90 s, each with its swell before it, the same every run; 18 s gliding in the storm ends 15.5 m lower and 66 m off
+its line (calm: 0.4 m); storm-bloom and storm-amber only in a storm. Economy and world checks unchanged.
+
+Measured: the mix (`tools/sound-mix.mjs`, dBFS): title -31 RMS, home by day -28, gliding -24, gliding high and
+fast -21, night -33, rain -22, storm -20, peaks -6 to -13, nothing near clipping; close thunder peaks 2 dB above
+the storm. Views: noon and golden captures within 0–5% of the stage-6 baselines (the grass is 4%); all 18,
+rain included, locked. Perf (one run, ms per frame, 1280 × 720 except Low at 960 × 540): Low 7.8–11.1,
+Medium 11.2–16.1, High 11.6–16.3; the storm view costs about the same as a clear day (Low +0.8 ms).
+
+Honest notes: nobody has listened to the mix: it was measured headless, by number. A synthesised piano is thin
+(GDD §8 already says so; CC0 samples need a download, so I haven't). Not done from GDD §8: a "discovery" music
+layer, waterfall and grass-rustle sounds, rain on roofs. The windmill reads too bright and grey in a storm.
+
+## Stage 8: UI, saving, onboarding, accessibility, performance tiers, QA, release
+
+Skills used: `save-systems` (versioned records, migrations, crash-safe writes, a fallback when storage is
+blocked), `game-ui-ux` and `input-systems` (menus by keyboard and gamepad with visible focus, rebinding with
+capture, touch hints), `threejs-performance` / `performance-optimization` / `threejs-debug-profiler` (medians over
+fresh pages, ablation, a DevTools trace to find a hitch rather than guessing), `threejs-qa-release` (the release
+pass and this stage's `QA.md`), `itch-publish` (the build only), `threejs-visual-validation` (the 18 baselines
+after every change), `camera-systems` (the over-the-shoulder slide in tight spots).
+
+What was built:
+
+- `game/save.js`: the profile (settings, bindings, tips) and four game slots (the autosave, kept on sleep, every
+  3 minutes of play and when the page is hidden, and three of the player's own). The game is the simulation
+  state as JSON (Maps and Sets tagged; the world, events and air rebuilt on load); loading lays the saved fields
+  over a fresh game, so new fields keep their defaults. Writes go scratch → read back → main, keeping a backup.
+- Menus: title (Continue with the day, a new farm with a confirm, load, settings), pause (save or load,
+  settings, back to the title), saved farms, settings (`game/menus.js`). Keyboard focus starts on each screen's
+  main button; a gamepad moves focus with the d-pad and presses with A, B goes back. Touch has a pause button.
+- Settings: sensitivity, invert, field of view; quality (automatic: Low on a touch device, else Medium; a change
+  saves and reloads, since the grass is built per tier), keep 60 fps, shadows, bloom; volume, music, effects,
+  wind and weather, captions; reduce motion (system or own), less camera lean, less zoom at speed, cue colours
+  (standard, red-green safe, blue-yellow safe: `game/gfx/cues.js`, with the stamina ring in CSS), text size,
+  gentle skies (in the simulation, so it's deterministic and saved: stamina drains 35% slower, gusts half as
+  hard); every action rebindable.
+- `game/tutorial.js`: the first five minutes as one quiet goal line under the clock, eight steps moved on by the
+  game's own events (seeds, plant, water, glider, glide to Daisy Step, find a seed, glide home, sleep); doing a
+  later step counts the earlier ones; a farm loaded past it skips it. Prompts and the goal line name the touch
+  button on a touch screen.
+- The camera slides over the right shoulder in tight places (inside the hut the player filled half the view).
+- The pouch fades out while gliding (GDD §9).
+- Performance: adaptive resolution ("keep 60 fps", `keepFrameRate` in main.js); the water and rain shaders are
+  compiled at load; the terrain's puddle and parched noises only run when needed; opaque draw order (an engine
+  addition) puts the terrain after what stands on it. On a phone, Low starts at CSS pixels.
+- Tools: `tools/ui-test.mjs`, `tools/fps.mjs`, `tools/shots.mjs`, `tools/build-itch.mjs`, `perf.mjs --runs`,
+  `stream-test.mjs --trace` and its long-frame and slow-shader reports; `chrome.mjs` exposes DevTools commands
+  and events.
+- `README.md`, `QA.md`, `marketing/` (six screenshots, the blurb, a 25 s trailer script), the itch zip in `dist/`
+  (not uploaded; `dist/` is not committed).
+
+Found and fixed by measuring:
+
+- **A 366 ms hitch** while streaming. The trace showed `GetProgramiv` waiting 460 ms: the water and waterfall
+  shaders compiled the first time a pond came into view (mid-glide), and the rain shader would have on the first
+  rainy day. Compiled at load now: the worst frame of the fast flight went from 366 to 44 ms, at a cost of about
+  0.5 s more to the first frame.
+- **Medium at 1920 × 1080 ran at 32 fps** (the tiers were measured at 1280 × 720, and pixels are most of the
+  cost: Low at 0.56 of the pixels is 5 ms cheaper). With the adaptive resolution it holds 60 fps at 0.64 scale.
+- The opaque draw order and the shader guards changed nothing measurable (16.2 vs 16.0 ms at the hut door, inside
+  the noise): the terrain's cost is its per-pixel lighting and haze on ground that really is visible. Kept: they
+  are free and right.
+- A settings screen too wide for a phone with large text (CSS zoom on the whole screen; now on the panel),
+  fieldsets refusing to shrink, the checkbox wrapping away from its label.
+
+Measured (all in `QA.md`): perf medians of 5 runs, Low 8.7–11.3 ms, Medium 12.2–16.0, High 12.0–16.7 at
+1280 × 720; real 60 fps with keep-60 at 1080p; first frame 1.2–2.0 s, 961 KB; the flight's worst frame 44 ms;
+memory 7–29 MB of island geometry and 46–96 MB of JS heap with the whole world visited; a save 6 KB; the itch
+zip 429 KB.
+
+Tests: `npm test` 48 checks, all pass (new: the goal line follows the pilot's first loop in order; save round
+trip with 20 s of identical play after, torn write, full storage, old profile, no storage); `tools/ui-test.mjs`
+all pass; the playtest passes at 59 fps; the 18 views within 1.1% of the baselines.
+
+Scorecard (`threejs-aaa-graphics-builder`, self-scored from the baselines, the marketing shots and the counts;
+stage 2 in brackets):
+
+| Category | Score | Why |
+|---|---|---|
+| Art direction | 2.5 (2.5) | one palette and mood through golden hour, noon, rain, storm and night |
+| Hero / player | 2 (1) | an authored gardener (straw hat, scarf, satchel) with walk, glide and idle poses, and the glider; simple shapes |
+| Obstacles (air, cliffs, storms) | 2.5 (1.5) | pollen thermals, current streaks, storms telegraphed by towering dark cloud, wind, thunder and a caption; gusts heard before they push |
+| Rewards / interactables | 2 (1.5) | crop stages, ripe sparkle and bob, sprites, glinting seeds; the crops are still simple shapes |
+| World / environment | 2.5 (2.5) | 20 islands with landmarks in haze, restoration you can see; the Crown's tree undersized, High Rocks patchy |
+| Materials / textures | 2 (2) | the shared material language, wet surfaces and puddles |
+| Lighting / render | 2.5 (2.5) | one atmosphere for sky, haze and light, through storm and night; lit windows |
+| VFX / motion | 2.5 (2) | rain streaks, splashes, lightning, fireflies, pollen, smoke, gusts in the grass |
+| UI / HUD | 2 (1) | real menus, settings, captions, a goal line, touch layout; a text clock, no map or journal |
+| Performance evidence | 2.5 (2) | medians, ablation, a traced and fixed hitch, adaptive resolution measured at 1080p |
+
+Average 2.3, nothing below 2: the premium bar, just. Self-scored, so take it as a claim to check against the
+screenshots, not a measurement.
+
+Honest notes: no person has played it for long, nobody has listened to the audio, and there is no phone to
+measure. Medium has no headroom at 1280 × 720 here. Not built from the GDD: the map, the journal,
+hold-to-toggle, the time-of-day arc, a name for the gardener. Stage 9 (co-op) needs your go-ahead first.
+
+## Stage 9: co-op (asked for on 2026-10-25)
+
+Built on the BREACH and TIDEFALL netcode (authoritative room, client prediction, reconciliation,
+interpolation, testing under simulated latency and loss, never only on localhost) and the `save-systems`
+approach from stage 8 (a version 2 save with a migration from 1). No new skill was loaded this stage.
+
+What was built:
+
+- `game/sim.js`: several players. `state.players` (the host first); `step(state, input)` still takes one input
+  for one player, and in co-op a Map of each player's inputs for the tick, stepping each player once per input
+  (the room's credit rules make that safe, and it's what lets a client predict itself exactly). Events carry
+  `by`. Shared: the farm, pouch, coins, bridges, progress, the glider's upgrades. Each player's own: body,
+  stamina, meal, the selected seed (falling back to the farm's when theirs has run out). The night passes when
+  everyone is in bed; falling wakes only the one who fell. Guests wake at the next free spot around the bed.
+- `game/save.js`: version 2 saves keep `players` (only the host is ever saved); version 1 saves migrate.
+  `worldSnapshot`/`applyWorld` for the room's world updates; `saveSnapshot`/`raw` for the host.
+- `server/server.mjs` (static files, `/ws`, `/status`, four-letter codes, 60 Hz) and `server/room.mjs` (the
+  authority: inputs with credit, 20 Hz snapshots, the world when it changes, saves to the host, talks and trades
+  checked against where the player is), after TIDEFALL's.
+- `game/protocol.js` (JSON, compressed by the socket), `game/net.js` (the client's copy of the farm, prediction
+  with its own farm actions for instant answers, quiet replays on reconciliation, world catch-up, interpolated
+  others, the transports and a bad-link simulator).
+- The page: Play together (host my farm / join by code / your name), the farm's code and who's here in the
+  pause menu, Leave the farm, notices when someone joins or builds; the others drawn in their own colours with
+  their own gliders, the same on every screen (the host is the gardener, guests have three outfits).
+- `ws` 8.22.0 copied from TIDEFALL's `node_modules` (nothing downloaded); `npm start` is now the server.
+
+Found and fixed on the way:
+
+- Guests woke inside the bed and the stove (the second and third spots beside the bed): now the next free spot.
+- A guest with nothing selected couldn't plant the farm's seeds.
+- Playing alone, the clock never stopped for the pause menu (it said it did): the pause, settings, saved-farm
+  and title screens now stop it; in co-op the farm keeps going for the others.
+- Each page drew its own gardener in the host's clothes, so friends saw different colours for the same person.
+
+Tests: `npm test` (all pass, single player unchanged), `tools/net-test.mjs` at 150 ms ± 30 with 3% late and at
+300 ms ± 80 with 8% late (all pass: exact prediction, shared planting, growth alike, sleep, talks validated,
+host saves, host leaving), `tools/coop-test.mjs` in real pages through the real server (all pass), the UI test,
+the playtest, the views (only the rain captures move, by the streaks' own noise).
+
+Measured: about 13–14 KB/s down per client as JSON with three players (about 7 KB/s deflated message by message,
+less with the socket's shared dictionary), 3.4 KB/s up.
+
+Honest notes: not played by people on separate machines or over the internet. No names over heads, no way to
+wave or chat. A tab in the background stops its gardener. A conversation's gift is checked against where the
+player is when it ends, so a guest who glides away before the last line loses it. The host's last 30 s are
+lost if their tab closes between saves.

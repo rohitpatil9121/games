@@ -1,0 +1,554 @@
+import { Entity, Mesh, InstancedMesh, Geometry, ParticleSystem, ShadowMap, primitives, quat } from "../engine/index.js";
+import { topAt } from "./islands.js";
+import { CROPS, DAY } from "./data.js";
+import { dayT } from "./sim.js";
+import { sample, makeAir } from "./air.js";
+import { shared, syncShared } from "./gfx/common.js";
+import { sunLight, skyAt } from "./gfx/atmosphere.js";
+import { skyMaterial } from "./gfx/sky.js";
+import { seaGeometry, seaMaterial, cumulusGeometry, cumulusMaterial } from "./gfx/clouds.js";
+import { Streamer } from "./gfx/stream.js";
+import { part, KIND, propMaterial } from "./gfx/props.js";
+import { drawCrops, drawSprites } from "./gfx/crops.js";
+import { bridgeGeometry, brokenGeometry } from "./gfx/bridges.js";
+import { airshipGeometry } from "./gfx/airship.js";
+import { Character } from "./gfx/characters.js";
+import { Creatures } from "./gfx/creatures.js";
+import { merchantAt } from "./progression.js";
+import { rainingAt } from "./farm.js";
+import { stormAt } from "./weather.js";
+import { islandUnder } from "./islands.js";
+import { rainGeometry, rainMaterial } from "./gfx/rain.js";
+import { CUES } from "./gfx/cues.js";
+/** who a co-op player looks like, by id: 1 the gardener (the host, or anyone alone), then three guest outfits */
+const lookFor = (id) => (id <= 1 ? "gardener" : "guest" + (((id - 2) % 3) + 1));
+import { makeRandom } from "./det.js";
+
+/**
+ * SKYFARM: the 3D scene. Presentation only: it reads the game state and draws it.
+ *
+ * Stage 2 ("look target"): every surface goes through the shared look in game/gfx (one atmosphere for the sky
+ * and the haze, one wind, the painterly light, the Ghibli grade in the composite). Draw calls stay few: each
+ * island is one mesh, its props one more, the roof one, grass one instanced draw per 8 m chunk (thinned with
+ * distance), the tree two (bark, leaves), all cumulus one, the cloud sea one, plots and crops instanced.
+ *
+ * Light over the day: the sun's direction follows an arc (east to west across the south); its colour, the sky
+ * light and the ground bounce all come from the atmosphere model (sunLight, skyAt), so golden hour turns warm
+ * and blue hour cool on their own, without colour keys to lerp between (stage 1's grey golden hour).
+ * @module game/world
+ */
+
+const PAL = {
+    soil: [0.45, 0.29, 0.19], soilWet: [0.28, 0.18, 0.12], leaf: [0.36, 0.62, 0.24], turnip: [0.95, 0.92, 0.86], turnipTop: [0.7, 0.38, 0.62],
+    rope: [0.72, 0.76, 0.36], seed: [1.6, 1.3, 0.6], cloth: [0.35, 0.55, 0.78], skin: [0.96, 0.8, 0.66], hair: [0.3, 0.2, 0.14],
+    canopy: [0.95, 0.9, 0.78], stripe: [0.82, 0.34, 0.25], wood: [0.5, 0.35, 0.23], dark: [0.12, 0.1, 0.1],
+};
+
+/** The player: a rounded body, a head with hair, a scarf; the glider canopy as its own mesh. */
+function playerGeometry() {
+    return Geometry.merge([
+        part(primitives.capsule(0.3, 0.55, 6, 14), [0, 0, 0.62], "cloth", [0, 0, 0], [1, 1, 1], PAL.cloth),
+        part(primitives.torus(0.24, 0.07, 6, 16), [0, 0, 1.12], "cloth", [0, 0, 0], [1, 1, 1], [0.86, 0.36, 0.28]),
+        part(primitives.sphere(0.24, 16, 12), [0, 0, 1.38], "cloth", [0, 0, 0], [1, 1, 1], PAL.skin),
+        part(primitives.sphere(0.26, 16, 12), [-0.04, 0, 1.47], "cloth", [0, 0, 0], [1, 1, 0.75], PAL.hair),
+        part(primitives.box(0.16, 0.5, 0.5), [-0.3, 0, 0.85], "timber", [0, 0, 0], [1, 1, 1], PAL.wood),
+        part(primitives.sphere(0.045, 8, 6), [0.23, 0.08, 1.41], "dark", [0, 0, 0], [1, 1, 1], PAL.dark),
+        part(primitives.sphere(0.045, 8, 6), [0.23, -0.08, 1.41], "dark", [0, 0, 0], [1, 1, 1], PAL.dark),
+    ], { uvs: false });
+}
+/**
+ * Grandmother's glider: one broad swept wing held overhead by a bar (more Mehve than paraglider). Each half is
+ * three cloth panels with a slight dihedral and sweep, red tips, a wooden spar and keel. Origin is the hands.
+ */
+function canopyGeometry() {
+    const parts = [];
+    for (const side of [1, -1]) {
+        for (let k = 0; k < 3; k++) {
+            const y = side * (0.35 + k * 0.7), chord = 1.25 - k * 0.22, sweep = -k * 0.16;
+            parts.push(part(primitives.box(chord, 0.72, 0.05), [0.15 + sweep, y, 1.05 + k * 0.12], "cloth", [side * -0.17, 0, side * 0.1 * k], [1, 1, 1], k === 2 ? PAL.stripe : PAL.canopy));
+        }
+        parts.push(part(primitives.box(0.06, 2.1, 0.06), [0.55, side * 1.05, 1.2], "timber", [side * -0.17, 0, side * -0.12], [1, 1, 1], PAL.wood));
+    }
+    parts.push(part(primitives.box(1.5, 0.08, 0.08), [0.1, 0, 1.0], "timber", [0, 0, 0], [1, 1, 1], PAL.wood));
+    parts.push(part(primitives.box(0.05, 0.05, 1.0), [0.2, 0.3, 0.5], "timber", [0, 0, 0], [1, 1, 1], PAL.wood));
+    parts.push(part(primitives.box(0.05, 0.05, 1.0), [0.2, -0.3, 0.5], "timber", [0, 0, 0], [1, 1, 1], PAL.wood));
+    parts.push(part(primitives.box(0.05, 0.75, 0.05), [0.2, 0, 0.02], "timber", [0, 0, 0], [1, 1, 1], PAL.wood));
+    return Geometry.merge(parts, { uvs: false });
+}
+
+export class World {
+    /**
+     * @param {import("../engine/Game.js").Game} game
+     * @param {object} world makeWorld() result
+     * @param {{ quality?: "low" | "medium" | "high" }} [options]
+     */
+    constructor(game, world, options = {}) {
+        this.game = game;
+        this.scene = game.scene;
+        this.world = world;
+        this.quality = options.quality || "medium";
+        this.reducedMotion = false;
+        const scene = this.scene, root = (this.root = scene.add(new Entity({ name: "world" })));
+        this._air = makeAir();
+        this._c = [0, 0, 0];
+        const add = (e) => { e.interpolate = false; root.add(e); return e; };
+
+        // sky and clouds
+        this.sky = add(new Entity({ name: "sky", castShadow: false, frustumCulled: false, mesh: new Mesh(primitives.sphere(5000, 40, 24), skyMaterial()) }));
+        this.seaMat = seaMaterial();
+        this.sea = add(new Entity({ name: "cloud-sea", castShadow: false, frustumCulled: false, mesh: new Mesh(seaGeometry(), this.seaMat) }));
+        const rand = makeRandom(5150), places = [];
+        for (let k = 0; k < 64; k++) {
+            const a = rand() * Math.PI * 2, r = 110 + rand() * 2300, low = rand() < 0.45, hi = rand() * 700;
+            places.push({ x: 900 + Math.cos(a) * r, y: Math.sin(a) * r * 0.6, z: low ? -6 + rand() * 10 : 25 + hi, size: low ? 18 + rand() * 30 : 10 + rand() * 24 });
+        }
+        add(new Entity({ name: "cumulus", castShadow: false, frustumCulled: false, mesh: new Mesh(cumulusGeometry(5151, places), cumulusMaterial()) }));
+
+        // the islands: streamed in tiers (gfx/stream.js); far silhouettes for all twenty are built now
+        this.stream = new Streamer(this, world);
+        const pm = this.stream.pm;
+
+        // plots and crops: instanced, painted by the prop material (colour alpha = surface kind)
+        const ipm = propMaterial(false);
+        const inst = (geo, n) => { const m = new InstancedMesh(geo, ipm, n); m.count = 0; add(new Entity({ mesh: m, frustumCulled: false })); return m; };
+        this.crops = { soil: inst(primitives.box(0.94, 0.94, 0.16), 400), leaves: inst(primitives.cone(0.5, 1, 6), 3000), balls: inst(primitives.sphere(0.5, 10, 7), 2000), stems: inst(primitives.cylinder(0.5, 0.5, 1, 6), 600) };
+        this.seeds = inst(primitives.sphere(0.5, 10, 8), 64);
+        this.spriteMesh = inst(primitives.sphere(0.5, 8, 6), 64);
+        // rain: streaks falling round the camera (gfx/rain.js)
+        this.rainMat = rainMaterial();
+        this.rain = add(new Entity({ name: "rain", mesh: new Mesh(rainGeometry(), this.rainMat), castShadow: false, frustumCulled: false }));
+        this.rain.visible = false; this.rainAmount = 0;
+        this.gliderItem = add(new Entity({ name: "glider-item", mesh: new Mesh(canopyGeometry(), pm) }));
+        this.gliderItem.setScale(0.45);
+
+        // bridges: a broken and a built mesh for each; the built one draws a prefix while it's going up
+        this.bridges = (world.data.bridges || []).map((b) => {
+            const built = bridgeGeometry(b), e = add(new Entity({ name: "bridge", mesh: new Mesh(built.geometry, pm) }));
+            const broken = add(new Entity({ name: "bridge-broken", castShadow: false, mesh: new Mesh(brokenGeometry(b), pm) }));
+            e.cullRadius = built.radius; e.visible = false;
+            return { b, built, e, broken, shown: -1 };
+        });
+        // heart stones: on the islands no bridge reaches, glowing until woken
+        const hearts = (world.data.hearts || []).filter((h) => !h.bridged);
+        this.hearts = hearts.map((h) => {
+            const g = Geometry.merge([part(primitives.sphere(0.5, 12, 8), [0, 0, 0.35], "stone", [0, 0, 0], [0.9, 0.8, 0.7]), part(primitives.sphere(0.5, 10, 8), [0, 0, 0.75], "glow", [0, 0, 0], [0.32, 0.32, 0.32], [0.6, 1.6, 1.3])], { uvs: false });
+            const e = add(new Entity({ name: "heart", castShadow: false, mesh: new Mesh(g, pm) }));
+            e.setPosition(h.x, h.y, h.z);
+            return { h, e };
+        });
+        this.creatures = new Creatures(world, this.root, pm);
+        // the merchant's airship and Captain Bram
+        this.airship = add(new Entity({ name: "airship", mesh: new Mesh(airshipGeometry(), pm) }));
+        this.airship.cullRadius = 20; this.airship.visible = false;
+        this.bramC = new Character("bram", pm);
+        this.bram = add(this.bramC.root);
+        this.bram.visible = false;
+        // the hermits, each by their landmark, facing out over their island
+        this.hermits = (world.data.hermits || []).map((h) => {
+            const c = new Character(h.id, pm);
+            add(c.root);
+            c.root.setPosition(h.x, h.y, h.z); c.root.setYaw(h.yaw);
+            return { h, c };
+        });
+        /** who the player is talking to (main.js sets it), for the talking pose */
+        this.talking = "";
+        const M = world.data.merchant;
+        if (M) { this.bram.setPosition(M.gangway[0], M.gangway[1], topAt(world.islands[0], M.gangway[0], M.gangway[1])); this.bram.setYaw(Math.PI); }
+
+        // the target tile: a thin bright frame
+        const frame = [];
+        for (const [x, y, w, d] of [[0, -0.5, 1, 0.06], [0, 0.5, 1, 0.06], [-0.5, 0, 0.06, 1], [0.5, 0, 0.06, 1]]) frame.push(part(primitives.box(w, d, 0.04), [x, y, 0], "cloth", [0, 0, 0], [1, 1, 1], [1.6, 1.5, 1.2]));
+        this.cursor = add(new Entity({ name: "cursor", castShadow: false, mesh: new Mesh(Geometry.merge(frame, { uvs: false }), pm) }));
+
+        // the player
+        this.player = new Character("gardener", pm);
+        this.charMaterial = pm;
+        /** co-op: the other gardeners to draw this frame (main.js sets it from net.js Client.others()) */
+        this.others = [];
+        this.otherViews = new Map();
+        this.body = add(this.player.root);
+        this.canopy = add(new Entity({ name: "canopy", mesh: new Mesh(canopyGeometry(), propMaterial(false)) }));
+        this.canopyOpen = 0;
+
+        // the air, and the feedback
+        const particles = (o) => { const p = scene.add(new ParticleSystem(o)); p.castShadow = false; p.frustumCulled = false; return p; };
+        this.pollen = particles({ capacity: 1600, drag: 0.2, name: "pollen" });
+        this.streaks = particles({ capacity: 900, drag: 0, name: "streaks" });
+        this.dust = particles({ capacity: 400, gravity: [0, 0, -3], drag: 3, blending: "normal", name: "dust" });
+        this.sparkle = particles({ capacity: 400, gravity: [0, 0, 1.2], drag: 2, name: "sparkle" });
+        this.splash = particles({ capacity: 300, gravity: [0, 0, -9], drag: 0.5, blending: "normal", name: "water" });
+        this.smoke = particles({ capacity: 160, gravity: [0, 0, 0.5], drag: 0.6, blending: "normal", name: "smoke" });
+        this.motes = particles({ capacity: 500, gravity: [0, 0, 0.05], drag: 0.8, name: "motes" });
+        const h = world.data.hut;
+        this.chimney = [h.x - h.w / 2 + 1.35, h.y + h.d / 2 - 1.05, topAt(world.islands[0], h.x, h.y) + h.h + 2.9];
+
+
+        this.setShadows(true);
+        // compile now the shaders the start doesn't draw (water first seen islands away, rain on the first rainy day):
+        // each takes a few hundred milliseconds to link on a laptop GPU, a visible hitch if it happens mid-glide
+        for (const m of [this.stream.water.still, this.stream.water.fall, this.rainMat]) game.renderer.programFor(m, false);
+        this.time = 0;
+        this._seed = 1;
+    }
+
+    /** sun shadows: two cascades over 70 m; Low has one smaller map over 45 m */
+    setShadows(on) {
+        const low = this.quality === "low";
+        this.scene.shadow = on ? new ShadowMap({ cascades: low ? 1 : 2, distance: low ? 45 : 70, size: low ? 1024 : this.quality === "high" ? 3072 : 2048, strength: 0.7 }) : null;
+    }
+
+    /** random 0..1 for effects only (not the simulation) */
+    _r() { this._seed = (Math.imul(this._seed, 1664525) + 1013904223) >>> 0; return this._seed / 4294967296; }
+
+    /** The sun (or moon) and the sky's light for the time of day, from the atmosphere. */
+    light(t, eye) {
+        const scene = this.scene;
+        // the sun rises in the east (+x), arcs across the south (-y), sets in the west at the start of blue hour.
+        // Elevation goes as sin², so it lingers low after sunrise and before sunset: golden hour is ~10° up.
+        // (shifted so the sun is already ~6° up when you wake, and sets at the start of blue hour)
+        const arc = Math.min(1, (t + 0.08) / (DAY.blue + 0.08)) * Math.PI, se = Math.sin(arc);
+        let sx = Math.cos(arc), sy = -0.42, sz = 0.82 * se * se - 0.015;
+        let m = Math.hypot(sx, sy, sz);
+        sx /= m; sy /= m; sz /= m;
+        const E = sunLight(eye[2], sz, this._c);
+        // under rain clouds the sun is dimmed and the light goes grey-blue (eased, so it doesn't snap)
+        // overcast under rain, heavier under a storm (and the storm darkens before its rain, the telegraph)
+        this.overcast = (this.overcast || 0) + (Math.max(this.raining ? 1 : 0, (this.storm || 0) * 1.3) - (this.overcast || 0)) * 0.02;
+        for (let i = 0; i < 3; i++) E[i] *= 1 - 0.6 * this.overcast;
+        shared.u_atmoSun.set(E);
+        // night: the moon lights the scene dimly from the other side
+        const night = 1 - Math.min(1, Math.max(0, (sz + 0.04) / 0.14));
+        shared.u_atmoNight = night;
+        if (night > 0.5) {
+            const n = Math.min(1, (t - DAY.night) / (1 - DAY.night) + 0.0);
+            sx = -0.5 + n; sy = 0.35; sz = 0.6; m = Math.hypot(sx, sy, sz); sx /= m; sy /= m; sz /= m;
+        }
+        scene.sunDirection[0] = sx; scene.sunDirection[1] = sy; scene.sunDirection[2] = sz;
+        const k = 0.5;
+        for (let i = 0; i < 3; i++) scene.sunColor[i] = E[i] * k + night * [0.1, 0.13, 0.24][i];
+        // sky light: the sky's radiance overhead and toward the horizon, averaged
+        const up = skyAt(eye[2], [0, 0, 1], scene.sunDirection, [0, 0, 0]), side = skyAt(eye[2], [0.7, 0, 0.3], scene.sunDirection, [0, 0, 0]);
+        // (a little less saturated than the sky itself: the light that reaches a shaded wall is a mix of everything)
+        const sl = (up[0] + up[1] + up[2] + side[0] + side[1] + side[2]) / 6;
+        // (a storm's cloud deck takes some of the sky light too, greyer)
+        const st = this.storm || 0;
+        for (let i = 0; i < 3; i++) scene.skyColor[i] = ((sl * 0.3 + (up[i] * 0.4 + side[i] * 0.6) * 0.7) * 0.9 * (1 - 0.35 * st) + sl * 0.15 * st) + night * [0.05, 0.07, 0.13][i];
+        // light from below: the cloud sea under everything is a huge bright reflector, so the islands' undersides
+        // get a soft blue-white fill instead of going dark (a meadow-facing surface gets a little green with it)
+        const g = [0.92, 0.91, 0.9];
+        for (let i = 0; i < 3; i++) scene.groundColor[i] = g[i] * (E[i] * 0.2 + scene.skyColor[i] * 0.45) + night * 0.02;
+        scene.fogDensity = 0;
+        // exposure key: predicted from the light model (no GPU readback), so noon isn't washed out and golden hour
+        // isn't murky; eased like an eye adapting, faster toward light than toward dark
+        const key = 0.3 * (scene.sunColor[0] + scene.skyColor[0]) + 0.59 * (scene.sunColor[1] + scene.skyColor[1]) + 0.11 * (scene.sunColor[2] + scene.skyColor[2]);
+        // (capped lower at night: night should look like night, blue and deep, not a dim day)
+        // (and the eye doesn't fully adapt to a storm: it should feel darker than a grey day)
+        this.exposureTarget = Math.min(2.4 - 1.0 * night, Math.max(0.9, 1.75 / Math.pow(Math.max(0.05, key), 0.75))) * (1 - 0.3 * st - 0.12 * Math.min(1, this.overcast));
+        // under cloud the light is diffuse: shadows go soft and faint
+        if (scene.shadow) scene.shadow.strength = 0.7 * (1 - 0.65 * Math.min(1, this.overcast));
+        scene.clearColor.set([side[0], side[1], side[2], 1]);
+    }
+
+    /**
+     * Draw a frame.
+     * @param {number} dt real seconds since the last frame
+     * @param {object} state the game
+     * @param {{ x: number, y: number, z: number, yaw: number, pitch: number, roll: number, glide: number, fx: number, fy: number }} pose the player, interpolated
+     * @param {number[]} eye the camera's position
+     */
+    update(dt, state, pose, eye) {
+        this.time += dt;
+        // the weather envelope, shared by every surface (gfx/common.js): wet rises in rain and dries after
+        this.storm = stormAt(state.seed, state.tick);
+        shared.u_storm = Math.max(this.storm, Math.min(1, this.overcast || 0) * 0.65);
+        shared.u_wet = Math.max(0, Math.min(1, shared.u_wet + (this.raining ? dt * 0.12 : -dt * 0.025)));
+        this.lightning(dt, eye);
+        this.light(dayT(state), eye);
+        const post = this.game.renderer.postfx;
+        if (post) {
+            if (this.exposure === undefined || this.snapExposure) { this.exposure = this.exposureTarget; this.snapExposure = false; }
+            const up = this.exposureTarget > this.exposure;
+            this.exposure += (this.exposureTarget - this.exposure) * (1 - Math.exp(-dt * (up ? 1.5 : 0.6)));
+            post.settings.exposure = this.exposure;
+        }
+        shared.u_player.set([pose.x, pose.y, pose.z, pose.glide ? 0 : 1]);
+        syncShared();
+        this.sky.setPosition(eye[0], eye[1], eye[2]);
+        this.stream.update(eye, state.progress.restored, dt);
+        this.drawBridges(state, eye);
+        this.drawMerchant(state, eye);
+        this.creatures.update(dt, state, eye, this.time);
+        for (const k of this.hearts) k.e.visible = !state.progress.restored.has(k.h.island);
+        // the cloud sea shows the shadows of the eight islands nearest the camera
+        const u = this.seaMat.values.u_islands, near = this.stream.records.slice().sort((p, q) => p.dist - q.dist);
+        for (let i = 0; i < 8; i++) { const isl = near[i].isl; u[i * 4] = isl.x; u[i * 4 + 1] = isl.y; u[i * 4 + 2] = isl.radius * 0.95; u[i * 4 + 3] = isl.top; }
+
+        // the player and the canopy
+        const want = pose.glide ? 1 : 0;
+        this.canopyOpen += (want - this.canopyOpen) * Math.min(1, dt * (want ? 9 : 6));
+        const qb = this.body.rotation;
+        if (pose.glide) {
+            quat.identity(qb);
+            quat.rotateZ(qb, qb, pose.yaw);
+            // hanging under the wing, nearly flat, head forward
+            quat.rotateY(qb, qb, 1.15 - pose.pitch * 0.3);
+            quat.rotateX(qb, qb, pose.roll);
+        } else quat.setAxisAngle(qb, [0, 0, 1], Math.atan2(pose.fy, pose.fx));
+        this.body.setPosition(pose.x, pose.y, pose.z + (pose.glide ? 0.25 : 0));
+        const ground = Math.hypot(state.player.vx, state.player.vy);
+        this.player.animate(dt, pose.glide ? "glide" : ground > 0.3 && state.player.ground ? "walk" : this.talking ? "talk" : "idle", ground, 0);
+        // the people: animate those near the camera, hide the rest; heads turn toward a player who comes close
+        for (const { h, c } of this.hermits) {
+            const d = Math.hypot(h.x - eye[0], h.y - eye[1], h.z - eye[2]);
+            c.root.visible = d < 160;
+            if (!c.root.visible) continue;
+            const pd = Math.hypot(pose.x - h.x, pose.y - h.y), toward = Math.atan2(pose.y - h.y, pose.x - h.x) - h.yaw;
+            const look = pd < 10 ? Math.atan2(Math.sin(toward), Math.cos(toward)) : 0;
+            c.animate(dt, this.talking === h.id ? "talk" : "idle", 0, look);
+        }
+        if (this.bram.visible) this.bramC.animate(dt, this.talking === "bram" ? "talk" : "idle", 0, 0);
+        const o = this.canopyOpen;
+        this.canopy.visible = o > 0.03;
+        if (this.canopy.visible) {
+            const qc = this.canopy.rotation;
+            quat.identity(qc);
+            quat.rotateZ(qc, qc, pose.yaw);
+            quat.rotateY(qc, qc, -pose.pitch * 0.5);
+            quat.rotateX(qc, qc, pose.roll);
+            // unfolds from a bundle on the back: span first, then it lifts into place
+            this.canopy.setPosition(pose.x, pose.y, pose.z + 0.2 + 0.4 * o);
+            this.canopy.setScale(0.4 + 0.6 * o, 0.1 + 0.9 * o, 0.4 + 0.6 * o);
+        }
+
+        this.drawOthers(dt);
+        this.drawFarm(state);
+        drawSprites(this.spriteMesh, state, this.time, 0);
+        this.drawRain(state, eye, dt);
+        this.drawItems(state);
+        this.drawCursor(state);
+        this.drawAir(state, eye, dt);
+        this.drawAmbient(dt, eye);
+        this.drawFireflies(dt, state, eye);
+    }
+
+    drawFarm(state) {
+        const t = dayT(state), night = t > DAY.blue || t < 0.02;
+        drawCrops(this.crops, state, this.time, night, (x, y, z, teal) => this.sparkle.emit(1, { position: [x, y, z], spread: 0.35, speed: 0.2, life: [0.6, 1.2], size: [0.09, 0], color: teal ? [...CUES.helped, 1] : [...CUES.ripe, 1] }));
+    }
+
+    drawItems(state) {
+        let n = 0;
+        this.gliderItem.visible = false;
+        const storming = (this.storm || 0) > 0.5;
+        for (const it of state.items) {
+            if (it.taken || (it.storm && !storming)) continue;
+            const bob = Math.sin(this.time * 2.2 + it.id) * 0.08;
+            if (it.kind === "glider") {
+                this.gliderItem.visible = true;
+                this.gliderItem.setPosition(it.x, it.y, it.z - 0.6);
+                this.gliderItem.setYaw(0.4);
+                continue;
+            }
+            this.seeds.setTransform(n, it.x, it.y, it.z + bob, 0.14);
+            const c = it.kind === "seed" ? PAL.seed : PAL.turnipTop;
+            this.seeds.setColor(n++, c[0], c[1], c[2], KIND.cloth);
+            if (this._r() < 0.08) this.sparkle.emit(1, { position: [it.x, it.y, it.z + bob], spread: 0.25, speed: 0.3, life: [0.5, 1], size: [0.08, 0], color: [1.8, 1.5, 0.8, 1] });
+        }
+        this.seeds.count = n;
+    }
+
+    drawCursor(state) {
+        const p = state.player, show = p.mode === "foot" && ["till", "plant", "water", "harvest"].includes(p.does);
+        this.cursor.visible = show;
+        if (show) this.cursor.setPosition(p.tx + 0.5, p.ty + 0.5, topAt(this.world.islands[0], p.tx + 0.5, p.ty + 0.5) + 0.12);
+    }
+
+    /** each bridge: broken, going up plank by plank, or built */
+    drawBridges(state, eye) {
+        for (const r of this.bridges) {
+            const s = state.progress.bridges[r.b.id];
+            // only a bridge near the camera can throw a shadow anyone sees (the cascades reach 70 m)
+            r.e.castShadow = Math.hypot(r.built.middle[0] - eye[0], r.built.middle[1] - eye[1]) < r.built.radius + 80;
+            r.broken.visible = s.state === "broken";
+            r.e.visible = s.state !== "broken";
+            if (s.state === "building") {
+                // draw the ropes and a prefix of the planks (36 indices a plank)
+                const planks = (r.built.total - r.built.frameIndices) / 36, n = Math.floor(planks * s.progress);
+                r.built.geometry.drawCount = r.built.frameIndices + n * 36;
+            } else if (s.state === "built" && r.shown !== 1) { r.built.geometry.drawCount = r.built.total; r.shown = 1; }
+        }
+    }
+
+    /** the airship: flies in from the far side of the sky, moors off Hearth Isle, flies off the other way */
+    drawMerchant(state, eye) {
+        const M = this.world.data.merchant;
+        if (!M) return;
+        const m = merchantAt(state.tick), [mx, my, mz] = M.moor;
+        this.airship.visible = m.phase !== "away";
+        this.bram.visible = m.phase === "moored";
+        if (m.phase === "away") return;
+        const ease = (u) => u * u * (3 - 2 * u);
+        let x = mx, y = my, z = mz, yaw = Math.PI / 2;
+        if (m.phase === "arriving") { const k = 1 - ease(m.u); x = mx + 700 * k; y = my - 900 * k; z = mz + 120 * k; yaw = Math.atan2(my - y, mx - x); }
+        else if (m.phase === "leaving") { const k = ease(m.u); x = mx + 900 * k; y = my + 700 * k; z = mz + 140 * k; yaw = Math.atan2(y - my, x - mx) || Math.PI / 2; }
+        // bob gently on its ropes while moored
+        z += Math.sin(this.time * 0.6) * 0.3;
+        this.airship.setPosition(x, y, z);
+        this.airship.setYaw(yaw);
+    }
+
+    /**
+     * Lightning, in a storm's rain: a flash every few seconds somewhere within a kilometre, lighting everything for a
+     * moment (u_flash); its thunder follows at the speed of sound (onThunder, main.js plays it).
+     */
+    lightning(dt, eye) {
+        shared.u_flash = Math.max(0, shared.u_flash - dt * 6);
+        // while it builds: thunder far off now and then, no flash yet (part of the telegraph, GDD §10)
+        if (this.storm > 0.3 && !this.raining) {
+            this.nextRumble = (this.nextRumble ?? 6) - dt;
+            if (this.nextRumble <= 0) { this.nextRumble = 12 + this._r() * 14; if (this.onThunder) this.onThunder(1000 + this._r() * 300); }
+            return;
+        }
+        if (!(this.storm > 0.6 && this.raining)) return;
+        this.nextFlash = (this.nextFlash ?? 3) - dt;
+        if (this.nextFlash > 0) return;
+        this.nextFlash = 4 + this._r() * 10;
+        const d = 150 + this._r() * 900;
+        shared.u_flash = 1 * (1 - d / 1400);
+        if (this.onThunder) this.onThunder(d);
+    }
+
+    /** Dress this player as their co-op id says (the host is the gardener; guests have their own colours on every screen). */
+    setPlayerLook(id) {
+        const who = lookFor(id);
+        if (this.player.who === who) return;
+        this.root.remove(this.player.root);
+        this.player = new Character(who, this.charMaterial);
+        this.body = this.root.add(this.player.root);
+        this.body.interpolate = false;
+    }
+
+    /** The other gardeners (co-op): each a character in their own colours with a glider of their own, posed as the player is. */
+    drawOthers(dt) {
+        const seen = new Set();
+        for (const o of this.others) {
+            seen.add(o.id);
+            let v = this.otherViews.get(o.id);
+            if (!v) {
+                const c = new Character(lookFor(o.id), this.charMaterial);
+                const root = this.root.add(c.root); root.interpolate = false;
+                const canopy = new Entity({ name: "canopy", mesh: new Mesh(canopyGeometry(), this.canopy.mesh.material) });
+                canopy.interpolate = false; this.root.add(canopy);
+                v = { c, canopy, open: 0 };
+                this.otherViews.set(o.id, v);
+            }
+            const body = v.c.root, qb = body.rotation;
+            body.visible = !o.asleep;
+            if (o.glide) { quat.identity(qb); quat.rotateZ(qb, qb, o.yaw); quat.rotateY(qb, qb, 1.15 - o.pitch * 0.3); quat.rotateX(qb, qb, o.roll); }
+            else quat.setAxisAngle(qb, [0, 0, 1], Math.atan2(o.fy, o.fx));
+            body.setPosition(o.x, o.y, o.z + (o.glide ? 0.25 : 0));
+            const ground = Math.hypot(o.vx || 0, o.vy || 0);
+            v.c.animate(dt, o.glide ? "glide" : ground > 0.3 ? "walk" : "idle", ground, 0);
+            v.open += ((o.glide ? 1 : 0) - v.open) * Math.min(1, dt * (o.glide ? 9 : 6));
+            v.canopy.visible = v.open > 0.03 && !o.asleep;
+            if (v.canopy.visible) {
+                const qc = v.canopy.rotation;
+                quat.identity(qc); quat.rotateZ(qc, qc, o.yaw); quat.rotateY(qc, qc, -o.pitch * 0.5); quat.rotateX(qc, qc, o.roll);
+                v.canopy.setPosition(o.x, o.y, o.z + 0.2 + 0.4 * v.open);
+                v.canopy.setScale(0.4 + 0.6 * v.open, 0.1 + 0.9 * v.open, 0.4 + 0.6 * v.open);
+            }
+        }
+        // whoever has left
+        for (const [id, v] of this.otherViews) if (!seen.has(id)) { v.c.root.visible = false; v.canopy.visible = false; if (!this.others.length) { this.root.remove?.(v.c.root); this.root.remove?.(v.canopy); this.otherViews.delete(id); } }
+    }
+
+    /** fireflies over the restored grass at night, round the camera */
+    drawFireflies(dt, state, eye) {
+        if (shared.u_atmoNight < 0.5 || this.raining) return;
+        const isl = islandUnder(this.world, eye[0], eye[1], eye[2]);
+        if (!isl || !state.progress.restored.has(isl.id) || eye[2] - isl.top > 25) return;
+        const n = Math.round(dt * 14);
+        for (let k = 0; k < n; k++) {
+            const a = this._r() * Math.PI * 2, r = 3 + this._r() * 25, x = eye[0] + Math.cos(a) * r, y = eye[1] + Math.sin(a) * r, z = topAt(isl, x, y);
+            if (z === -Infinity) continue;
+            this.motes.emit(1, { position: [x, y, z + 0.4 + this._r() * 1.6], velocity: [(this._r() - 0.5) * 0.6, (this._r() - 0.5) * 0.6, 0.1], speed: 0.2, life: [3, 6], size: [0.09, 0.06], color: [1.4, 1.9, 0.5, 1], colorEnd: [1.2, 1.6, 0.4, 0] });
+        }
+    }
+
+    /** rain round the camera while it falls (and the light dims under the cloud, in light()) */
+    drawRain(state, eye, dt) {
+        this.raining = rainingAt(state.seed, state.tick);
+        // the streaks: half of them in a shower, all in a storm, eased in and out; slanted by the wind
+        const want = this.raining ? 0.55 + 0.45 * (this.storm || 0) : 0;
+        this.rainAmount += (want - this.rainAmount) * Math.min(1, dt * 0.8);
+        const v = this.rainMat.values, W = shared.u_wind, push = 1.5 + (this.storm || 0) * 4;
+        v.u_rain = this.rainAmount; v.u_time = this.time % 10000;
+        v.u_drift[0] = W[0] * push; v.u_drift[1] = W[1] * push; v.u_drift[2] = this.storm || 0;
+        this.rain.visible = this.rainAmount > 0.01;
+        if (!this.raining) return;
+        // splashes where it lands, on the island under the camera
+        const isl = islandUnder(this.world, eye[0], eye[1], eye[2]);
+        if (isl) for (let k = 0; k < Math.round(dt * 160); k++) {
+            const a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * 14, x = eye[0] + Math.cos(a) * r, y = eye[1] + Math.sin(a) * r, z = topAt(isl, x, y);
+            if (z > -Infinity) this.splash.emit(2, { position: [x, y, z + 0.05], speed: 0.9, velocity: [0, 0, 1.4], life: [0.2, 0.35], size: [0.05, 0.01], color: [0.8, 0.86, 0.95, 0.6] });
+        }
+    }
+
+    /** chimney smoke and the motes of pollen that drift in the afternoon light */
+    drawAmbient(dt, eye) {
+        // mist where the waterfalls meet the clouds, spray at their lips
+        for (const fall of this.stream.falls) {
+            if (Math.hypot(fall.base[0] - eye[0], fall.base[1] - eye[1]) > 700) continue;
+            if (this._r() < dt * 14) this.smoke.emit(1, { position: fall.base, spread: 6, velocity: [fall.dir[0] * 1.5, fall.dir[1] * 1.5, 2.2], speed: 1.2, life: [3, 6], size: [3, 9], color: [0.95, 0.97, 1.0, 0.45], colorEnd: [0.95, 0.97, 1.0, 0] });
+            if (this._r() < dt * 8) this.splash.emit(2, { position: fall.top, spread: 1.2, velocity: [fall.dir[0] * 2, fall.dir[1] * 2, 0.5], speed: 1, life: [0.5, 1], size: [0.1, 0.03], color: [0.85, 0.92, 1, 0.8] });
+        }
+        if (this.chimneyReady && this.stream.records[0].mid && this._r() < dt * 3) this.smoke.emit(1, { position: this.chimney, spread: 0.15, velocity: [shared.u_wind[0] * 0.8, shared.u_wind[1] * 0.8, 0.9], speed: 0.15, life: [4, 7], size: [0.35, 1.6], color: [0.92, 0.92, 0.9, 0.4], colorEnd: [0.9, 0.92, 0.95, 0] });
+        const n = Math.round(dt * 40);
+        for (let k = 0; k < n; k++) {
+            const a = this._r() * Math.PI * 2, r = 2 + this._r() * 16;
+            this.motes.emit(1, { position: [eye[0] + Math.cos(a) * r, eye[1] + Math.sin(a) * r, eye[2] - 1 + this._r() * 4], velocity: [shared.u_wind[0] * 0.6, shared.u_wind[1] * 0.6, 0.05], speed: 0.1, life: [3, 6], size: [0.05, 0.03], color: [1.4, 1.3, 0.9, 0.7], colorEnd: [1.2, 1.1, 0.8, 0] });
+        }
+    }
+
+    /** pollen up the thermals, streaks along the currents, emitted around the camera */
+    drawAir(state, eye, dt) {
+        const t = state.tick / 60;
+        for (const s of state.air) {
+            if (s.kind === "thermal") {
+                const near = Math.hypot(s.at[0] - eye[0], s.at[1] - eye[1]);
+                if (near > 400) continue;
+                const n = Math.round(dt * 60 * (near < 150 ? 2 : 1));
+                for (let k = 0; k < n; k++) {
+                    const a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * s.radius * 0.8, z = s.bottom + 20 + this._r() * (s.top - s.bottom - 20);
+                    const x = s.at[0] + Math.cos(a) * r, y = s.at[1] + Math.sin(a) * r;
+                    sample(state.air, t, x, y, z, this._air);
+                    // swirl around the column as they rise
+                    this.pollen.emit(1, { position: [x, y, z], velocity: [-Math.sin(a) * 1.6 + this._air.x, Math.cos(a) * 1.6 + this._air.y, this._air.z], life: [4, 7], size: [0.22, 0.12], color: [1.5, 1.35, 0.8, 0.9], colorEnd: [1.2, 1.1, 0.7, 0] });
+                }
+            } else if (s.kind === "current") {
+                const n = Math.round(dt * 60 * 1.5);
+                for (let k = 0; k < n; k++) {
+                    const u = this._r(), a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * s.radius * 0.6;
+                    const x = s.from[0] + (s.to[0] - s.from[0]) * u, y = s.from[1] + (s.to[1] - s.from[1]) * u + Math.cos(a) * r, z = s.from[2] + (s.to[2] - s.from[2]) * u + Math.sin(a) * r;
+                    sample(state.air, t, x, y, z, this._air);
+                    this.streaks.emit(1, { position: [x, y, z], velocity: [this._air.x * 1.4, this._air.y * 1.4, this._air.z * 1.4], life: [1.5, 2.5], size: [0.16, 0.05], color: [1.6, 1.6, 1.5, 0.7], colorEnd: [1.4, 1.4, 1.4, 0] });
+                }
+            }
+        }
+    }
+
+    /** One-shot effects for what the simulation did this tick. */
+    events(state) {
+        const p = state.player;
+        for (const e of state.events) {
+            const home = this.world.islands[0];
+            const at = e.ix !== undefined ? [e.ix + 0.5, e.iy + 0.5, topAt(home, e.ix + 0.5, e.iy + 0.5) + 0.15] : [p.x, p.y, p.z + 0.1];
+            if (e.type === "till") this.dust.emit(14, { position: at, spread: 0.3, velocity: [0, 0, 2.2], speed: 1.6, life: [0.4, 0.8], size: [0.12, 0.04], color: [0.5, 0.33, 0.2, 1] });
+            else if (e.type === "plant") this.dust.emit(6, { position: at, spread: 0.15, velocity: [0, 0, 1.2], speed: 0.6, life: [0.3, 0.5], size: [0.08, 0.02], color: [0.45, 0.3, 0.2, 1] });
+            else if (e.type === "water") this.splash.emit(22, { position: [at[0], at[1], at[2] + 0.8], spread: 0.25, velocity: [0, 0, -1], speed: 1.2, life: [0.4, 0.7], size: [0.07, 0.03], color: [0.7, 0.85, 1.0, 0.9] });
+            else if (e.type === "harvest" || e.type === "pick" || e.type === "sprout") this.sparkle.emit(e.type === "sprout" ? 10 : 24, { position: e.x !== undefined ? [e.x, e.y, e.z] : [at[0], at[1], at[2] + 0.4], spread: 0.3, velocity: [0, 0, 1.2], speed: 1.4, life: [0.5, 1.1], size: [0.12, 0], color: [1.8, 1.5, 0.8, 1] });
+            else if (e.type === "land") this.dust.emit(e.hard ? 30 : 12, { position: [p.x, p.y, p.z + 0.05], spread: 0.3, velocity: [0, 0, 1], speed: e.hard ? 3 : 1.6, flat: true, life: [0.4, 0.9], size: [0.18, 0.06], color: [0.82, 0.8, 0.7, 0.8] });
+            else if (e.type === "open") this.streaks.emit(20, { position: [p.x, p.y, p.z + 1.6], spread: 1.2, speed: 2, life: [0.4, 0.8], size: [0.12, 0], color: [1.6, 1.6, 1.5, 0.8] });
+        }
+    }
+}
