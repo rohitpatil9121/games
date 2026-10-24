@@ -36,6 +36,10 @@ export function codeName(code) {
     if (isPad(code)) return "Pad " + code.slice(7);
     return code;
 }
+/** An action's keys and pad buttons as words, for the settings ("E or Left mouse", "Pad X"). */
+export function describe(codes) {
+    return { keys: codes.filter((c) => !isPad(c) && !isTouch(c)).map(codeName).join(" or ") || "none", pad: codes.filter(isPad).map(codeName).join(" or ") || "none" };
+}
 /** The first keyboard-or-mouse key of an action, short, for prompts ("E"). */
 export function keyHint(bindings, id) {
     const c = (bindings[id] || []).find((k) => !isPad(k) && !isTouch(k));
@@ -117,6 +121,38 @@ export class Controls {
     }
 
     showTouch(on) { this.touch.setVisible(on && this.coarse); }
+
+    /**
+     * Rebind an action (TIDEFALL's): resolves with the next key, mouse button or gamepad button pressed (null for
+     * Escape, which cancels). A key replaces the action's keyboard/mouse codes; a pad button replaces its pad
+     * codes; touch buttons stay.
+     */
+    capture(actionId) {
+        return new Promise((done) => {
+            const finish = (code) => {
+                removeEventListener("keydown", onKey, true); removeEventListener("mousedown", onMouse, true); clearInterval(poll);
+                if (code) {
+                    const codes = this.settings.bindings[actionId] || [];
+                    this.settings.bindings[actionId] = isPad(code) ? [...codes.filter((c) => !isPad(c)), code] : [code, ...codes.filter((c) => isPad(c) || isTouch(c))];
+                    this.apply();
+                }
+                done(code);
+            };
+            const onKey = (e) => { e.preventDefault(); e.stopPropagation(); finish(e.code === "Escape" ? null : e.code); };
+            const onMouse = (e) => { e.preventDefault(); e.stopPropagation(); finish("Mouse" + e.button); };
+            const names = ["GamepadA", "GamepadB", "GamepadX", "GamepadY", "GamepadLB", "GamepadRB", "GamepadLT", "GamepadRT", "GamepadBack", "GamepadStart", "GamepadLS", "GamepadRS", "GamepadUp", "GamepadDown", "GamepadLeft", "GamepadRight"];
+            // ignore a pad button already held when listening starts (the A that pressed "change")
+            const held = new Set();
+            for (const pad of navigator.getGamepads ? navigator.getGamepads() : []) if (pad) pad.buttons.forEach((b, i) => b.pressed && held.add(i));
+            const poll = setInterval(() => {
+                for (const pad of navigator.getGamepads ? navigator.getGamepads() : []) if (pad) for (let i = 0; i < names.length; i++) {
+                    if (pad.buttons[i] && pad.buttons[i].pressed) { if (!held.has(i)) return finish(names[i]); } else held.delete(i);
+                }
+            }, 60);
+            addEventListener("keydown", onKey, true);
+            setTimeout(() => addEventListener("mousedown", onMouse, true), 150);
+        });
+    }
 
     /** Is an action held? A finger on the view is for looking, so it doesn't count as the mouse button. */
     held(action) {

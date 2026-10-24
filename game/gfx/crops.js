@@ -1,3 +1,4 @@
+import { CUES } from "./cues.js";
 import { CROPS } from "../data.js";
 import { KIND } from "./props.js";
 
@@ -134,11 +135,11 @@ export function drawSprites(m, state, time, alpha) {
     for (const s of state.sprites) {
         if (n + 3 > m.capacity) break;
         const x = s.x + s.vx * alpha / 60, y = s.y + s.vy * alpha / 60, z = s.z + Math.sin(time * 4 + s.id) * 0.08;
-        m.setTransform(n, x, y, z, 0.11, 0.11, 0.13); m.setColor(n++, 0.6, 1.8, 1.6, KIND.glow);
+        m.setTransform(n, x, y, z, 0.11, 0.11, 0.13); m.setColor(n++, CUES.sprite[0], CUES.sprite[1], CUES.sprite[2], KIND.glow);
         const flap = Math.abs(Math.sin(time * 22 + s.id)) * 0.9 + 0.1, a = Math.atan2(s.vy, s.vx);
         for (const side of [-1, 1]) {
             const wx = x - Math.sin(a) * side * 0.12, wy = y + Math.cos(a) * side * 0.12;
-            m.setTransform(n, wx, wy, z + 0.06, 0.05, 0.12 * flap, 0.02, a); m.setColor(n++, 1.2, 1.6, 1.7, KIND.glow);
+            m.setTransform(n, wx, wy, z + 0.06, 0.05, 0.12 * flap, 0.02, a); m.setColor(n++, CUES.wing[0], CUES.wing[1], CUES.wing[2], KIND.glow);
         }
     }
     m.count = n;

@@ -40,7 +40,9 @@ import { Texture } from "./Texture.js";
  * @module engine/Renderer
  */
 
-const byProgram = (a, b) => (a._pk < b._pk ? -1 : a._pk > b._pk ? 1 : 0);
+// entity.drawOrder first (lower draws earlier; added for SKYFARM: an expensive, often-hidden surface such as terrain
+// goes after what stands on it, so the depth test rejects its hidden pixels before they are shaded), then program
+const byProgram = (a, b) => ((a.drawOrder || 0) - (b.drawOrder || 0)) || (a._pk < b._pk ? -1 : a._pk > b._pk ? 1 : 0);
 const NO_SHADOW = new Float32Array(4);
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -195,7 +197,7 @@ export class Renderer {
 
         if (scene.sky) { scene.sky.draw(gl, cam, this.time); this._resetState(); }
 
-        // opaque: group by program key to avoid switching programs back and forth
+        // opaque: by draw order, then grouped by program key to avoid switching programs back and forth
         opaque.sort(byProgram);
         // transparent: farthest first
         const depth = this._depth;

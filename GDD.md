@@ -304,6 +304,14 @@ Colour-blind modes swap the crop-ready, sprite and storm cues to safe hues and k
 - **Accessibility:** remappable controls, captions, colour-blind modes, reduce motion, reduced roll and FOV
   kick, text scaling, an assist mode (stamina doesn't run out, gentler gusts), hold-to-toggle options.
 - **Mobile:** joystick, glide stick, context button, safe areas; layouts from phone to ultrawide.
+- **As built (stage 8):** the HUD is a text clock and weather line top-left (not an arc), a goal line under it
+  for the first five minutes, coins and materials top-right, the pouch bottom-centre (it fades out while
+  gliding), prompts above it, captions above those, the stamina ring by the player. Menus: title (Continue,
+  a new farm, load, settings), pause (save or load, settings, back to the title), settings, saved farms
+  (autosave + 3 slots). Not built: the hand-drawn map, the journal, hold-to-toggle options, a name for the
+  gardener. The first five minutes are taught by the goal line, one short sentence per step, moved on by the
+  game's own events (`game/tutorial.js`), not by prompts on hesitation. Gentle skies (the assist) makes stamina
+  last 1.5 times as long and halves gusts rather than making stamina endless: the glide is still the game.
 
 ## 10. AI and creatures
 
@@ -331,7 +339,8 @@ Utility AI, structured like TIDEFALL's bots.
 - **Weather per day (seeded):** clear 45%, breezy 30%, light rain 18%, storm 7% (never before day 4).
 - **Day:** 20 real minutes: dawn 1.5, day 13, golden hour 2.5, blue hour 1, night 2. Sleep skips to dawn.
 - **Save:** versioned schema with migrations, autosave on sleep and every 3 minutes, 3 manual slots,
-  write-to-temp-then-swap in `localStorage`, clean fallback if storage is blocked.
+  write-to-temp-then-swap in `localStorage`, clean fallback if storage is blocked. *(As built: `game/save.js`;
+  the autosave also runs when the page is hidden. A save is about 6 KB.)*
 - **Download and load:** no downloaded art (everything procedural), target under 3 MB and under 3 s to
   the first frame; memory measured with the whole world visited.
 - **Co-op:** only stage 9, only after you agree (TIDEFALL/BREACH netcode, host's save is authority).
@@ -350,7 +359,7 @@ tell you honestly, with numbers (glide time, how often a test pilot lands where 
 
 - **Free.** No ads, no purchases.
 - **Marketing:** 5 screenshots (golden hour, rain, night, glide, restored world), a 25 s trailer script,
-  and a store blurb in `marketing/`.
+  and a store blurb in `marketing/`. *(As built: six, the night shot and the great tree added; `tools/shots.mjs`.)*
 - **Platform:** web; runs from any static host (`npm start` locally). An itch.io zip is prepared, not
   uploaded. Nothing pushed or deployed unless you ask.
 - **Post-launch:** co-op, more bands, seasons, house decoration; known issues in the README.

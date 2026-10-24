@@ -65,6 +65,7 @@ export class Streamer {
     buildFar(rec) {
         const isl = rec.isl, out = [];
         out.push(new Entity({ name: isl.id, castShadow: false, mesh: new Mesh(islandGeometry(isl, [], 0.22, rec.band.grass), rec.material) }));
+        out[out.length - 1].drawOrder = 1;
         const lm = landmarkGeometry(this.world.shapes.get(isl.id), 0.25);
         if (lm) out.push(new Entity({ name: isl.id + "-landmark", castShadow: false, mesh: new Mesh(lm, this.pm) }));
         // big trees are part of a far silhouette too (Apple Terraces, the Crown)
@@ -73,7 +74,9 @@ export class Streamer {
 
     *buildMid(rec) {
         const isl = rec.isl, out = [], d = this.world.data, home = isl === this.world.islands[0];
+        // the terrain draws after the props, grass and trees on it (engine drawOrder): most of it under them is never shaded
         out.push(new Entity({ name: isl.id, castShadow: false, mesh: new Mesh(islandGeometry(isl, home ? d.paths : [], 0.5, rec.band.grass), rec.material) }));
+        out[out.length - 1].drawOrder = 1;
         yield;
         const lm = landmarkGeometry(this.world.shapes.get(isl.id), 0.6);
         if (lm) out.push(new Entity({ name: isl.id + "-landmark", mesh: new Mesh(lm, this.pm) }));

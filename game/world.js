@@ -19,6 +19,7 @@ import { rainingAt } from "./farm.js";
 import { stormAt } from "./weather.js";
 import { islandUnder } from "./islands.js";
 import { rainGeometry, rainMaterial } from "./gfx/rain.js";
+import { CUES } from "./gfx/cues.js";
 import { makeRandom } from "./det.js";
 
 /**
@@ -177,6 +178,9 @@ export class World {
 
 
         this.setShadows(true);
+        // compile now the shaders the start doesn't draw (water first seen islands away, rain on the first rainy day):
+        // each takes a few hundred milliseconds to link on a laptop GPU, a visible hitch if it happens mid-glide
+        for (const m of [this.stream.water.still, this.stream.water.fall, this.rainMat]) game.renderer.programFor(m, false);
         this.time = 0;
         this._seed = 1;
     }
@@ -322,7 +326,7 @@ export class World {
 
     drawFarm(state) {
         const t = dayT(state), night = t > DAY.blue || t < 0.02;
-        drawCrops(this.crops, state, this.time, night, (x, y, z, teal) => this.sparkle.emit(1, { position: [x, y, z], spread: 0.35, speed: 0.2, life: [0.6, 1.2], size: [0.09, 0], color: teal ? [0.6, 1.8, 1.6, 1] : [1.8, 1.5, 0.8, 1] }));
+        drawCrops(this.crops, state, this.time, night, (x, y, z, teal) => this.sparkle.emit(1, { position: [x, y, z], spread: 0.35, speed: 0.2, life: [0.6, 1.2], size: [0.09, 0], color: teal ? [...CUES.helped, 1] : [...CUES.ripe, 1] }));
     }
 
     drawItems(state) {

@@ -5,6 +5,8 @@
  *   node tools/perf.mjs              # every tier, at the heaviest views, 1280 x 720
  *   node tools/perf.mjs 1600 900     # another size
  *   node tools/perf.mjs --ablate     # Medium, with one system switched off at a time: what each one costs
+ *   node tools/perf.mjs --runs=5     # each tier in 5 fresh pages; the median and range across them (run-to-run
+ *                                    # noise on this machine is a few ms, so one run can't settle a budget)
  *
  * Timing: gl.finish() returns early on ANGLE/D3D11 (the engine's ARCHITECTURE §9.2), so each sample renders
  * 40 frames back to back and then reads one pixel back with readPixels, which can't return until the GPU has
@@ -15,7 +17,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { launch } from "./chrome.mjs";
 
-const ablate = process.argv.includes("--ablate");
+const args = process.argv.slice(2), ablate = args.includes("--ablate");
 const [width = "1280", height = "720"] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 /** what to switch off for each ablation row: entity names, or "post" / "shadow" */
 const OFF = { none: [], cumulus: ["cumulus"], "cloud sea": ["cloud-sea"], sky: ["sky"], grass: ["grass", "flowers"], trees: ["bark", "leaves", "fruit"], "island rock": ["@islands"], landmarks: ["*-landmark"], water: ["water", "waterfall"], props: ["props", "roof"], post: ["post"], shadows: ["shadow"] };
@@ -74,16 +76,22 @@ try {
         }
         await page.close();
     }
-    for (const q of ablate ? [] : ["low", "medium", "high"]) {
+    const runs = +((args.find((a) => a.startsWith("--runs=")) || "").slice(7) || 1), all = {};
+    for (let run = 0; run < runs; run++) for (const q of ablate ? [] : ["low", "medium", "high"]) {
         const page = await browser.page(`http://localhost:${port}/?quality=${q}`, { width: +width, height: +height });
         await page.waitFor("!!window.skyfarm", 20000);
         await page.evaluate("document.getElementById('start').click(); document.getElementById('hud').style.display = 'none'; skyfarm.run(0.2); true");
         for (const [name, v] of Object.entries(VIEWS)) {
             const r = await page.evaluate(measure(v));
-            console.log(`${q.padEnd(7)} ${name.padEnd(12)} ${String(r.ms).padStart(6)} ms/frame (worst sample ${r.worst})  draws ${r.draws} + ${r.shadow} shadow, ${r.tris} triangles, ${r.canvas.join("x")}`);
+            (all[q + " " + name] ||= []).push(r.ms);
+            if (runs === 1) console.log(`${q.padEnd(7)} ${name.padEnd(12)} ${String(r.ms).padStart(6)} ms/frame (worst sample ${r.worst})  draws ${r.draws} + ${r.shadow} shadow, ${r.tris} triangles, ${r.canvas.join("x")}`);
         }
         if (page.errors.length) console.log("console errors:\n" + page.errors.join("\n"));
         await page.close();
+    }
+    if (runs > 1) for (const [k, v] of Object.entries(all)) {
+        v.sort((a, b) => a - b);
+        console.log(`${k.padEnd(28)} median ${v[v.length >> 1].toFixed(2).padStart(6)} ms  (${v[0].toFixed(2)}–${v[v.length - 1].toFixed(2)} over ${v.length} runs)${v[v.length >> 1] > 16.6 ? "  over 60 fps budget" : ""}`);
     }
 } finally {
     await browser.close();

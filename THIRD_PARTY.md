@@ -15,8 +15,8 @@ code. Nothing was downloaded for SKYFARM: every file below was copied from the a
 
 `engine/` and `shaders/` are a copy of the Projection Lab engine (https://github.com/rohitpatil9121/projection_library),
 itself built on projection_library by Rohit Sawant (https://github.com/rohit-s-init/projection_library).
-Changes: `engine/Audio.js`'s `play()` takes `opts.bus` (from TIDEFALL), `Camera.roll`, and `PostFX.lut` /
-`lutAmount` (marked in the files).
+Changes: `engine/Audio.js`'s `play()` takes `opts.bus` (from TIDEFALL), `Camera.roll`, `PostFX.lut` /
+`lutAmount`, and an opaque draw order (`entity.drawOrder` in `Renderer`) (marked in the files).
 
 ## Art and sound
 

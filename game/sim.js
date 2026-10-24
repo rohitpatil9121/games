@@ -77,6 +77,8 @@ export function createState(world, options = {}) {
         /** what happened this tick: { type, ... } */
         events: [],
         nextItem: d.items.length + 1,
+        /** "gentle skies" (the settings' assist): stamina drains 35% slower and storm gusts push half as hard */
+        assist: !!options.assist,
     };
     for (const [ix, iy] of d.tilled) state.plots.set(ix + "," + iy, makePlot(world, ix, iy));
     state.weather = weatherOf(state.seed, dayNumber(state));
@@ -333,7 +335,8 @@ function stepGlide(state, p, input, pressed) {
     p.inLift = air.lift; p.inCurrent = air.current;
     // a storm's gusts push the glider about (weather.js); the HUD and the sound read p.gust
     gustAt(state.seed, state.tick, gust);
-    air.x += gust.x; air.y += gust.y; air.z += gust.z;
+    const gk = state.assist ? 0.5 : 1;
+    air.x += gust.x * gk; air.y += gust.y * gk; air.z += gust.z * gk;
     p.gust = gust.push; p.gustWarn = gust.warn;
     if (gust.push > 0.5 && !p.gusted) { p.gusted = true; state.events.push({ type: "gust" }); } else if (gust.push < 0.1) p.gusted = false;
     const cy = dcos(p.yaw), sy = dsin(p.yaw);
@@ -347,7 +350,7 @@ function stepGlide(state, p, input, pressed) {
     // ---- stamina
     if (!p.drift) {
         const lift = air.z > STAMINA.freeRise;
-        p.stamina -= (lift ? (p.z < STAMINA.freeClimbBelow ? 0 : STAMINA.liftDrain) : STAMINA.drain) * (p.z > STAMINA.coldAbove ? STAMINA.cold : 1) * DT;
+        p.stamina -= (lift ? (p.z < STAMINA.freeClimbBelow ? 0 : STAMINA.liftDrain) : STAMINA.drain) * (p.z > STAMINA.coldAbove ? STAMINA.cold : 1) * (state.assist ? 0.65 : 1) * DT;
         if (p.stamina <= 0) { p.stamina = 0; p.drift = true; state.events.push({ type: "tired" }); }
     }
 

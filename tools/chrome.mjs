@@ -64,7 +64,7 @@ export async function launch(options = {}) {
             const ws = new WebSocket(target.webSocketDebuggerUrl);
             await new Promise((done, fail) => { ws.onopen = done; ws.onerror = () => fail(new Error("DevTools socket failed")); });
             let id = 0;
-            const pending = new Map(), logs = [], errors = [];
+            const pending = new Map(), logs = [], errors = [], listeners = new Map();
             let loaded = null, closed = false;
             ws.onclose = () => { if (!closed) for (const { fail } of pending.values()) fail(new Error("DevTools socket closed")); };
             ws.onmessage = (event) => {
@@ -81,6 +81,7 @@ export async function launch(options = {}) {
                     const d = msg.params.exceptionDetails;
                     errors.push((d.exception && d.exception.description) || d.text);
                 } else if (msg.method === "Page.loadEventFired" && loaded) loaded();
+                if (msg.method && listeners.has(msg.method)) for (const fn of listeners.get(msg.method)) fn(msg.params);
             };
             const send = (method, params = {}) => new Promise((done, fail) => { pending.set(++id, { done, fail }); ws.send(JSON.stringify({ id, method, params })); });
             await send("Page.enable");
@@ -119,6 +120,10 @@ export async function launch(options = {}) {
                     const r = await send("Page.captureScreenshot", { format, quality: format === "jpeg" ? quality : undefined, clip });
                     return Buffer.from(r.data, "base64");
                 },
+                /** Send any DevTools Protocol command (for tracing and the like). */
+                send,
+                /** Listen for a DevTools Protocol event. */
+                on(method, fn) { if (!listeners.has(method)) listeners.set(method, []); listeners.get(method).push(fn); },
                 /** Change the viewport size. */
                 resize(width, height) { return send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: size.scale || 1, mobile: !!size.mobile }); },
                 close() { closed = true; ws.close(); return fetch(`${http}/json/close/${target.id}`).catch(() => {}); },

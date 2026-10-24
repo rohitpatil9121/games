@@ -15,9 +15,69 @@
   <div class="panel">
     <h1 id="title-h">SKYFARM</h1>
     <p class="tag">Grow a garden on an island in the sky. Glide to the next one.</p>
-    <button id="start" class="primary">Wake up</button>
-    <p class="small">Mouse to look · WASD to walk (and to steer the glider) · Space to jump, and again in the air to glide · E to use · Q for the next seed · Shift to run</p>
-    <p class="small">Early build: the farm, the islands, the bridges and the airship.</p>
+    <div class="buttons col">
+      <button id="start" class="primary">Wake up</button>
+      <button id="new-game" hidden>Start a new farm</button>
+      <button id="open-load">Load a saved farm</button>
+      <button id="open-settings">Settings</button>
+    </div>
+    <p id="new-confirm" class="small" hidden role="alert">A new farm replaces the autosave (your three saved slots stay). Press again to start over.</p>
+    <p class="small" id="title-keys"></p>
+    <p class="small">Free, no ads. Keyboard and mouse, gamepad or touch.</p>
+  </div>
+</section>
+
+<section id="slots" class="screen" hidden aria-labelledby="slots-h">
+  <div class="panel wide">
+    <h2 id="slots-h">Saved farms</h2>
+    <p class="small">The autosave is kept every time you sleep, every few minutes, and when you leave the page.</p>
+    <ol id="slot-list" class="slots"></ol>
+    <p id="slot-status" class="small" role="status"></p>
+    <div class="buttons"><button id="slots-back" class="primary">Back</button></div>
+  </div>
+</section>
+
+<section id="settings" class="screen" hidden aria-labelledby="settings-h">
+  <div class="panel wide scroll">
+    <h2 id="settings-h">Settings</h2>
+    <div class="cols">
+      <fieldset>
+        <legend>Controls</legend>
+        <label class="line">Look sensitivity <input id="s-sensitivity" type="range" min="0.2" max="3" step="0.05"> <output id="s-sensitivity-out"></output></label>
+        <label class="line"><input id="s-invert" type="checkbox"> Invert look up and down</label>
+        <label class="line">Field of view <input id="s-fov" type="range" min="50" max="80" step="1"> <output id="s-fov-out"></output></label>
+      </fieldset>
+      <fieldset>
+        <legend>Picture</legend>
+        <label class="line">Quality <select id="s-quality"><option value="auto">Automatic</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+        <p class="small" id="s-quality-note">Changing quality saves your farm and reloads.</p>
+        <label class="line"><input id="s-dynres" type="checkbox"> Keep 60 fps (lowers the resolution when needed)</label>
+        <label class="line"><input id="s-shadows" type="checkbox"> Shadows</label>
+        <label class="line"><input id="s-bloom" type="checkbox"> Glow (bloom)</label>
+      </fieldset>
+      <fieldset>
+        <legend>Sound</legend>
+        <label class="line">Volume <input id="s-volume" type="range" min="0" max="1" step="0.05"> <output id="s-volume-out"></output></label>
+        <label class="line">Music <input id="s-music" type="range" min="0" max="1" step="0.05"> <output id="s-music-out"></output></label>
+        <label class="line">Effects <input id="s-sfx" type="range" min="0" max="1" step="0.05"> <output id="s-sfx-out"></output></label>
+        <label class="line">Wind and weather <input id="s-ambience" type="range" min="0" max="1" step="0.05"> <output id="s-ambience-out"></output></label>
+        <label class="line"><input id="s-captions" type="checkbox"> Captions for important sounds</label>
+      </fieldset>
+      <fieldset>
+        <legend>Comfort and accessibility</legend>
+        <label class="line">Reduce motion <select id="s-motion"><option value="system">As the system says</option><option value="on">On</option><option value="off">Off</option></select></label>
+        <label class="line"><input id="s-roll" type="checkbox"> Less camera lean when gliding</label>
+        <label class="line"><input id="s-fovkick" type="checkbox"> Less zoom at speed</label>
+        <label class="line">Colours for cues <select id="s-scheme"><option value="standard">Standard</option><option value="redgreen">Red-green safe</option><option value="blueyellow">Blue-yellow safe</option></select></label>
+        <label class="line">Text size <select id="s-text"><option value="1">Normal</option><option value="1.15">Large</option><option value="1.3">Larger</option></select></label>
+        <label class="line"><input id="s-assist" type="checkbox"> Gentle skies: stamina lasts longer, gusts push half as hard</label>
+      </fieldset>
+    </div>
+    <fieldset>
+      <legend>Keys and buttons <button id="bindings-reset" class="link">Reset all</button></legend>
+      <div id="bindings" class="bindings"></div>
+    </fieldset>
+    <div class="buttons"><button id="settings-back" class="primary">Back</button></div>
   </div>
 </section>
 
@@ -36,18 +96,27 @@
 <section id="pause" class="screen" hidden aria-labelledby="pause-h">
   <div class="panel">
     <h2 id="pause-h">Paused</h2>
-    <button id="resume" class="primary">Back to the sky</button>
+    <p class="small">Nothing grows or moves while you're away.</p>
+    <div class="buttons col">
+      <button id="resume" class="primary">Back to the sky</button>
+      <button id="open-save">Save or load</button>
+      <button id="open-settings-2">Settings</button>
+      <button id="to-title">Back to the title</button>
+    </div>
+    <p id="pause-status" class="small" role="status"></p>
   </div>
 </section>
 
 <div id="hud" hidden>
   <div id="clock" aria-live="off"></div>
+  <div id="goal" aria-live="polite"></div>
   <div id="coins" aria-label="Coins and bridge materials"></div>
   <div id="pouch" aria-label="Seed pouch"></div>
   <div id="prompt" role="status"></div>
   <div id="notice" role="status"></div>
   <div id="caption" aria-live="polite"></div>
   <div id="stamina" aria-hidden="true"></div>
+  <button id="touch-pause" aria-label="Pause">II</button>
 </div>
 <div id="talk" hidden role="dialog" aria-live="polite" aria-labelledby="talk-name">
   <div id="talk-name"></div>

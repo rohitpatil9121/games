@@ -139,10 +139,11 @@ void main() {
         albedo = v_color.rgb * (0.9 + 0.18 * fine) * (0.94 + 0.1 * clump);
         // parched: straw and dust, patchy, until a bridge or the heart brings the island back
         vec3 straw = mix(vec3(0.62, 0.54, 0.34), vec3(0.55, 0.45, 0.3), fine);
-        albedo = mix(albedo, straw * (0.9 + 0.2 * clump), u_dry * (0.75 + 0.25 * smoothstep(0.3, 0.7, fbm(w.xy * 0.12))));
+        if (u_dry > 0.0) albedo = mix(albedo, straw * (0.9 + 0.2 * clump), u_dry * (0.75 + 0.25 * smoothstep(0.3, 0.7, fbm(w.xy * 0.12))));
         wrap = 0.45;
         // puddles: in the low, flat, worn places a slow noise picks, filling as the rain goes on; rings ripple in them
-        float pool = smoothstep(0.86, 0.9, 1.0 - fbm(w.xy * 0.16) + (1.0 - v_color.g) * 0.2) * smoothstep(0.96, 0.995, n.z) * smoothstep(0.25, 0.85, u_wet);
+        // (only when it is wet at all: the noise costs on every grassy pixel)
+        float pool = u_wet > 0.25 ? smoothstep(0.86, 0.9, 1.0 - fbm(w.xy * 0.16) + (1.0 - v_color.g) * 0.2) * smoothstep(0.96, 0.995, n.z) * smoothstep(0.25, 0.85, u_wet) : 0.0;
         if (pool > 0.01) {
             vec2 cell = floor(w.xy * 1.3), f = fract(w.xy * 1.3) - 0.5;
             float ph = fract(u_time * 0.9 + hash12(cell)), ring = sin((length(f) - ph * 0.5) * 40.0) * (1.0 - ph) * step(length(f), ph * 0.5 + 0.05);

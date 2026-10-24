@@ -413,3 +413,88 @@ Medium 11.2–16.1, High 11.6–16.3; the storm view costs about the same as a c
 Honest notes: nobody has listened to the mix: it was measured headless, by number. A synthesised piano is thin
 (GDD §8 already says so; CC0 samples need a download, so I haven't). Not done from GDD §8: a "discovery" music
 layer, waterfall and grass-rustle sounds, rain on roofs. The windmill reads too bright and grey in a storm.
+
+## Stage 8: UI, saving, onboarding, accessibility, performance tiers, QA, release
+
+Skills used: `save-systems` (versioned records, migrations, crash-safe writes, a fallback when storage is
+blocked), `game-ui-ux` and `input-systems` (menus by keyboard and gamepad with visible focus, rebinding with
+capture, touch hints), `threejs-performance` / `performance-optimization` / `threejs-debug-profiler` (medians over
+fresh pages, ablation, a DevTools trace to find a hitch rather than guessing), `threejs-qa-release` (the release
+pass and this stage's `QA.md`), `itch-publish` (the build only), `threejs-visual-validation` (the 18 baselines
+after every change), `camera-systems` (the over-the-shoulder slide in tight spots).
+
+What was built:
+
+- `game/save.js`: the profile (settings, bindings, tips) and four game slots (the autosave, kept on sleep, every
+  3 minutes of play and when the page is hidden, and three of the player's own). The game is the simulation
+  state as JSON (Maps and Sets tagged; the world, events and air rebuilt on load); loading lays the saved fields
+  over a fresh game, so new fields keep their defaults. Writes go scratch → read back → main, keeping a backup.
+- Menus: title (Continue with the day, a new farm with a confirm, load, settings), pause (save or load,
+  settings, back to the title), saved farms, settings (`game/menus.js`). Keyboard focus starts on each screen's
+  main button; a gamepad moves focus with the d-pad and presses with A, B goes back. Touch has a pause button.
+- Settings: sensitivity, invert, field of view; quality (automatic: Low on a touch device, else Medium; a change
+  saves and reloads, since the grass is built per tier), keep 60 fps, shadows, bloom; volume, music, effects,
+  wind and weather, captions; reduce motion (system or own), less camera lean, less zoom at speed, cue colours
+  (standard, red-green safe, blue-yellow safe: `game/gfx/cues.js`, with the stamina ring in CSS), text size,
+  gentle skies (in the simulation, so it's deterministic and saved: stamina drains 35% slower, gusts half as
+  hard); every action rebindable.
+- `game/tutorial.js`: the first five minutes as one quiet goal line under the clock, eight steps moved on by the
+  game's own events (seeds, plant, water, glider, glide to Daisy Step, find a seed, glide home, sleep); doing a
+  later step counts the earlier ones; a farm loaded past it skips it. Prompts and the goal line name the touch
+  button on a touch screen.
+- The camera slides over the right shoulder in tight places (inside the hut the player filled half the view).
+- The pouch fades out while gliding (GDD §9).
+- Performance: adaptive resolution ("keep 60 fps", `keepFrameRate` in main.js); the water and rain shaders are
+  compiled at load; the terrain's puddle and parched noises only run when needed; opaque draw order (an engine
+  addition) puts the terrain after what stands on it. On a phone, Low starts at CSS pixels.
+- Tools: `tools/ui-test.mjs`, `tools/fps.mjs`, `tools/shots.mjs`, `tools/build-itch.mjs`, `perf.mjs --runs`,
+  `stream-test.mjs --trace` and its long-frame and slow-shader reports; `chrome.mjs` exposes DevTools commands
+  and events.
+- `README.md`, `QA.md`, `marketing/` (six screenshots, the blurb, a 25 s trailer script), the itch zip in `dist/`
+  (not uploaded; `dist/` is not committed).
+
+Found and fixed by measuring:
+
+- **A 366 ms hitch** while streaming. The trace showed `GetProgramiv` waiting 460 ms: the water and waterfall
+  shaders compiled the first time a pond came into view (mid-glide), and the rain shader would have on the first
+  rainy day. Compiled at load now: the worst frame of the fast flight went from 366 to 44 ms, at a cost of about
+  0.5 s more to the first frame.
+- **Medium at 1920 × 1080 ran at 32 fps** (the tiers were measured at 1280 × 720, and pixels are most of the
+  cost: Low at 0.56 of the pixels is 5 ms cheaper). With the adaptive resolution it holds 60 fps at 0.64 scale.
+- The opaque draw order and the shader guards changed nothing measurable (16.2 vs 16.0 ms at the hut door, inside
+  the noise): the terrain's cost is its per-pixel lighting and haze on ground that really is visible. Kept: they
+  are free and right.
+- A settings screen too wide for a phone with large text (CSS zoom on the whole screen; now on the panel),
+  fieldsets refusing to shrink, the checkbox wrapping away from its label.
+
+Measured (all in `QA.md`): perf medians of 5 runs, Low 8.7–11.3 ms, Medium 12.2–16.0, High 12.0–16.7 at
+1280 × 720; real 60 fps with keep-60 at 1080p; first frame 1.2–2.0 s, 961 KB; the flight's worst frame 44 ms;
+memory 7–29 MB of island geometry and 46–96 MB of JS heap with the whole world visited; a save 6 KB; the itch
+zip 429 KB.
+
+Tests: `npm test` 48 checks, all pass (new: the goal line follows the pilot's first loop in order; save round
+trip with 20 s of identical play after, torn write, full storage, old profile, no storage); `tools/ui-test.mjs`
+all pass; the playtest passes at 59 fps; the 18 views within 1.1% of the baselines.
+
+Scorecard (`threejs-aaa-graphics-builder`, self-scored from the baselines, the marketing shots and the counts;
+stage 2 in brackets):
+
+| Category | Score | Why |
+|---|---|---|
+| Art direction | 2.5 (2.5) | one palette and mood through golden hour, noon, rain, storm and night |
+| Hero / player | 2 (1) | an authored gardener (straw hat, scarf, satchel) with walk, glide and idle poses, and the glider; simple shapes |
+| Obstacles (air, cliffs, storms) | 2.5 (1.5) | pollen thermals, current streaks, storms telegraphed by towering dark cloud, wind, thunder and a caption; gusts heard before they push |
+| Rewards / interactables | 2 (1.5) | crop stages, ripe sparkle and bob, sprites, glinting seeds; the crops are still simple shapes |
+| World / environment | 2.5 (2.5) | 20 islands with landmarks in haze, restoration you can see; the Crown's tree undersized, High Rocks patchy |
+| Materials / textures | 2 (2) | the shared material language, wet surfaces and puddles |
+| Lighting / render | 2.5 (2.5) | one atmosphere for sky, haze and light, through storm and night; lit windows |
+| VFX / motion | 2.5 (2) | rain streaks, splashes, lightning, fireflies, pollen, smoke, gusts in the grass |
+| UI / HUD | 2 (1) | real menus, settings, captions, a goal line, touch layout; a text clock, no map or journal |
+| Performance evidence | 2.5 (2) | medians, ablation, a traced and fixed hitch, adaptive resolution measured at 1080p |
+
+Average 2.3, nothing below 2: the premium bar, just. Self-scored, so take it as a claim to check against the
+screenshots, not a measurement.
+
+Honest notes: no person has played it for long, nobody has listened to the audio, and there is no phone to
+measure. Medium has no headroom at 1280 × 720 here. Not built from the GDD: the map, the journal,
+hold-to-toggle, the time-of-day arc, a name for the gardener. Stage 9 (co-op) needs your go-ahead first.

@@ -45,7 +45,16 @@ export class Rig {
             view.pitch += (-0.22 + pose.pitch * 0.4 - view.pitch) * k;
         }
         const yaw = view.yaw, pitch = view.pitch;
-        const px = pose.x, py = pose.y, pz = pose.z + HEIGHT;
+        // in a tight spot (indoors, under a roof, against a cliff) the arm is short and the player would fill the
+        // view: the pivot slides over the right shoulder and up a little, so you look past them (as far as the
+        // room allows), and comes back as the arm lengthens
+        const tight = gliding ? 0 : Math.max(0, Math.min(1, (2.8 - this.distance) / 1.8));
+        let px = pose.x, py = pose.y, pz = pose.z + HEIGHT + 0.25 * tight;
+        if (tight > 0) {
+            const rx = Math.sin(view.yaw), ry = -Math.cos(view.yaw), side = rayWorld(world, px, py, pz, rx, ry, 0, 1);
+            const off = Math.min(0.65, side < 0 ? 0.65 : Math.max(0, side - 0.3)) * tight;
+            px += rx * off; py += ry * off;
+        }
         const cp = Math.cos(pitch), bx = -cp * Math.cos(yaw), by = -cp * Math.sin(yaw), bz = -Math.sin(pitch);
         const far = gliding ? GLIDE_DISTANCE : FOOT_DISTANCE;
         const hit = rayWorld(world, px, py, pz, bx, by, bz, far + 0.4);

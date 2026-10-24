@@ -6,7 +6,11 @@ const topAtPlot = (isl, ix, iy) => topAt(isl, ix + 0.5, iy + 0.5);
 import { createState, step, dayT, dayNumber } from "./sim.js";
 import { World } from "./world.js";
 import { Rig } from "./camera.js";
-import { Controls, defaultBindings, keyHint } from "./controls.js";
+import { Controls, defaultBindings, keyHint, ACTIONS } from "./controls.js";
+import { SaveStore } from "./save.js";
+import { Tutorial } from "./tutorial.js";
+import { settingsScreen, slotsScreen, gamepadMenus } from "./menus.js";
+import { setCueScheme } from "./gfx/cues.js";
 import { makePilot, pilotInput, firstLoopPlan } from "./pilot.js";
 import { makeGradeLut } from "./gfx/grade.js";
 import { sell, buy, materials, nextMerchantDay, merchantAt } from "./progression.js";
@@ -20,12 +24,24 @@ import { TRADE } from "./data.js";
 
 /**
  * SKYFARM: the application. Screens, the camera, and the wiring between the parts. The game lives in sim.js,
- * the scene in world.js. Stage 1: one start screen, a pause screen, a minimal HUD.
+ * the scene in world.js, saving in save.js, the menus in menus.js, the first five minutes in tutorial.js.
  * @module game/main
  */
 
 const $ = (id) => document.getElementById(id);
-const settings = { sensitivity: 1, invertY: false, bindings: defaultBindings(), reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches, reducedFov: false };
+// the profile (settings, bindings, tips) and the saved farms (save.js)
+const store = new SaveStore();
+const profile = store.profile();
+const settings = profile.settings;
+{
+    // bindings: keep the player's, add any action that is new since they saved
+    const d = defaultBindings();
+    settings.bindings = { ...d, ...(settings.bindings || {}) };
+    for (const a of ACTIONS) if (!Array.isArray(settings.bindings[a.id])) settings.bindings[a.id] = d[a.id];
+}
+const systemReducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** what the camera and the effects read: the settings with "as the system says" worked out (applySettings) */
+const comfort = { reducedMotion: false, reducedRoll: false, reducedFov: false };
 
 // ------------------------------------------------------------------ engine
 const canvas = $("view");
@@ -36,13 +52,15 @@ const { renderer, camera, input } = game;
 renderer.postfx = new PostFX(renderer, { bloom: { threshold: 1.6, knee: 0.6, intensity: 0.32, radius: 1.2 }, exposure: 1.3, tonemap: "aces", lut: makeGradeLut(1), lutAmount: 1, vignette: 0.16, grain: 0.012, contrast: 1, saturation: 1 });
 
 const world = makeWorld(WORLD);
-// quality tier (GDD §11): low / medium / high; ?quality= picks one (the settings menu arrives in stage 8)
-const quality = ["low", "medium", "high"].includes(new URLSearchParams(location.search).get("quality")) ? new URLSearchParams(location.search).get("quality") : "medium";
+// quality tier (GDD §11): low / medium / high from the settings; "auto" is Low on a phone or tablet, Medium
+// otherwise; ?quality= overrides (the tools)
+const asked = new URLSearchParams(location.search).get("quality");
+const quality = ["low", "medium", "high"].includes(asked) ? asked : settings.quality !== "auto" ? settings.quality : matchMedia("(pointer: coarse)").matches ? "low" : "medium";
 renderer.setQuality(quality === "low" ? "low" : quality === "high" ? "high" : "medium");
 const view3d = new World(game, world, { quality });
 const controls = new Controls(input, canvas, settings);
 const rig = new Rig(camera);
-let state = createState(world);
+let state = createState(world, { assist: settings.assist });
 // build what is near the bed before the first frame (everything further streams in while you play)
 view3d.stream.settle([state.player.x, state.player.y, state.player.z + 2]);
 /** the player's pose last tick, for drawing between ticks */
@@ -53,34 +71,103 @@ let pilot = null;
 let shot = null;
 
 // ------------------------------------------------------------------ sound (sound.js): effects, wind, rain, birds, the score, captions
-const sound = new Sound({ volume: 0.8 });
+const sound = new Sound({ volume: settings.volume });
 for (const type of ["pointerdown", "keydown"]) addEventListener(type, () => sound.start(), { once: true });
 let captionTimer = 0;
 sound.onCaption = (text, seconds) => { $("caption").textContent = text; $("caption").classList.add("on"); captionTimer = seconds; };
 
 // ------------------------------------------------------------------ screens
-let screen = "title";
+let screen = "title", backTo = "title";
+/** a game has started this visit (so there is something to save) */
+let started = false;
 function show(name) {
+    if (name === "settings" || name === "slots") backTo = screen === "settings" || screen === "slots" ? backTo : screen;
     screen = name;
     $("title").hidden = name !== "title";
     $("pause").hidden = name !== "pause";
+    $("settings").hidden = name !== "settings";
+    $("slots").hidden = name !== "slots";
     $("trade").hidden = name !== "trade";
     $("talk").hidden = name !== "talk";
     $("ending").hidden = name !== "ending";
-    $("hud").hidden = name === "title";
+    $("hud").hidden = name === "title" || ((name === "settings" || name === "slots") && backTo === "title");
     controls.active = name === "play";
     controls.showTouch(name === "play");
     if (name !== "play") for (const code of [...input.down]) input.release(code);
+    // focus where a keyboard or gamepad player expects it
+    const first = { title: "start", pause: "resume", settings: "settings-back", slots: "slots-back", trade: "trade-close", ending: "ending-close" }[name];
+    if (first) $(first).focus({ preventScroll: true });
+    if (name === "settings") $("settings").querySelector(".panel").scrollTop = 0;
+    if (name === "title") titleButtons();
 }
 function lockMouse() {
     if (controls.coarse) return;
     try { const a = canvas.requestPointerLock(); if (a && a.catch) a.catch(() => {}); } catch { /* not available */ }
 }
-function play() { show("play"); lockMouse(); canvas.focus(); }
-$("start").addEventListener("click", play);
+function play() { started = true; show("play"); lockMouse(); canvas.focus(); }
+
+// ------------------------------------------------------------------ saving: the autosave on sleep, every few minutes and on leaving
+let sinceSave = 0;
+function autosave() {
+    if (!started) return true;
+    sinceSave = 0;
+    const ok = store.save(0, state);
+    if (!ok) notice("Couldn't save: the browser's storage is full or blocked.");
+    return ok;
+}
+let profileTimer = 0;
+/** the profile is written a moment after the last change (a slider sends many) */
+function persist() { clearTimeout(profileTimer); profileTimer = setTimeout(() => store.storeProfile(profile), 300); }
+addEventListener("visibilitychange", () => { if (document.hidden) { autosave(); store.storeProfile(profile); } });
+addEventListener("pagehide", () => { autosave(); store.storeProfile(profile); });
+
+/** Put a loaded game in place: the camera jumps, the world around it is built, the sim carries on. */
+function begin(next) {
+    state = next;
+    state.assist = settings.assist;
+    const p = state.player;
+    prev.x = p.x; prev.y = p.y; prev.z = p.z;
+    view3d.stream.settle([p.x, p.y, p.z + 2]);
+    tutorial.skipFor(state);
+    persist();
+}
+function loadSlot(n) {
+    const g = store.load(n, world);
+    if (!g) return false;
+    begin(g);
+    play();
+    return true;
+}
+// the title: Continue if there's an autosave, else a new farm
+let confirmNew = false;
+function titleButtons() {
+    const auto = store.peek(0);
+    $("start").textContent = started ? "Back to the sky" : auto ? `Continue (day ${auto.day})` : "Wake up";
+    $("new-game").hidden = !auto && !started;
+    $("open-load").disabled = ![0, 1, 2, 3].some((n) => store.peek(n));
+    $("new-confirm").hidden = true; confirmNew = false;
+    const k = hint;
+    $("title-keys").textContent = controls.coarse ? "Drag to look · the stick to walk and to steer the glider · Jump, and again in the air to glide · Use · Seed for the next seed" : `Mouse to look · ${k("forward")}${k("left")}${k("back")}${k("right")} to walk and to steer the glider · ${k("jump")} to jump, and again in the air to glide · ${k("interact")} to use · ${k("cycle")} for the next seed`;
+}
+$("start").addEventListener("click", () => { if (!started && store.peek(0) && loadSlot(0)) return; play(); });
+$("new-game").addEventListener("click", () => {
+    if (!confirmNew) { confirmNew = true; $("new-confirm").hidden = false; return; }
+    begin(createState(world, { assist: settings.assist }));
+    play();
+    autosave();
+});
 $("resume").addEventListener("click", play);
+$("touch-pause").addEventListener("click", () => { if (screen === "play") show("pause"); });
+$("to-title").addEventListener("click", () => { autosave(); show("title"); });
+const slots = slotsScreen({ store, canSave: () => started && backTo === "pause", save: (n) => store.save(n, state), load: loadSlot, back: () => show(backTo) });
+$("open-load").addEventListener("click", () => { show("slots"); slots.open(); });
+$("open-save").addEventListener("click", () => { show("slots"); slots.open(); });
+for (const id of ["open-settings", "open-settings-2"]) $(id).addEventListener("click", () => show("settings"));
 document.addEventListener("pointerlockchange", () => { if (!document.pointerLockElement && screen === "play" && !controls.coarse) show("pause"); });
-addEventListener("keydown", (e) => { if (e.code === "Escape" && screen === "play" && controls.coarse) show("pause"); });
+addEventListener("keydown", (e) => {
+    if (e.code === "Escape" && screen === "play" && controls.coarse) show("pause");
+    else if (e.code === "Escape" && (screen === "settings" || screen === "slots") && !menus.capturing) show(backTo);
+});
 canvas.addEventListener("click", () => { if (screen === "play" && !document.pointerLockElement) lockMouse(); });
 
 // ------------------------------------------------------------------ the loop
@@ -92,6 +179,9 @@ game.onUpdate(() => {
     else { inp = controls.gather(); inp.yaw = quantizeYaw(controls.view.yaw); }
     step(state, inp);
     for (const e of state.events) onEvent(e);
+    if (tutorial.events(state.events, (x, y, z) => islandUnder(world, x, y, z)?.id || "", state.player)) persist();
+    if (input.wasPressed("pause") && screen === "play") show("pause");
+    if (screen === "play" && (sinceSave += 1 / TICK_RATE) > 180) autosave();
     view3d.events(state);
 });
 
@@ -129,9 +219,10 @@ function onEvent(e) {
     else if (e.type === "pollinated" && !toldSprites) { toldSprites = true; notice("A sprite is visiting your flowers. Crops near them will give more."); }
     else if (e.type === "sprout") notice(`Your ${NAMES[e.crop].toLowerCase()} has sprouted`);
     else if (e.type === "fell" || e.type === "slept") fade(e.type === "fell" ? "You wake up at home." : `Day ${dayNumber(state)}`);
+    if (e.type === "slept") autosave();
     else if (e.type === "not-tired") notice("Not tired yet. Come back after noon.");
     else if (e.type === "tired") notice("Out of breath: the glider is only a parachute now. Land and rest.");
-    else if (e.type === "land" && e.hard && !settings.reducedMotion) game.juice.shake(0.25);
+    else if (e.type === "land" && e.hard && !comfort.reducedMotion) game.juice.shake(0.25);
     if (e.type === "land" && e.glide) p.landed = true;
 }
 
@@ -141,8 +232,42 @@ function fade(text) { const f = $("fade"); f.textContent = text; f.classList.rem
 
 const DOES = { till: "Till", plant: "Plant", water: "Water", harvest: "Harvest", pick: "Pick up", sleep: "Sleep", cook: "Cook", stove: "Stove",
     upgrade: "Fit to the glider", trade: "Trade with Captain Bram", talk: "Talk", wake: "Wake the heart stone", build: "Build the bridge", bridge: "Look at the broken bridge" };
+// ------------------------------------------------------------------ keeping 60 fps (the settings' "keep 60 fps")
+// The tiers are measured at 1280 x 720 (QA.md); a bigger window or a high-DPI screen multiplies the pixels, and
+// pixels are most of the cost. So the drawing buffer's scale follows the frame time: if most of the last second
+// was slower than 55 fps it steps down (to 0.55 at least), and after 6 s of comfortable frames it steps back up,
+// but not above where it last had to come down from for half a minute, so it doesn't hunt.
+// (on a phone Low starts at the screen's CSS pixels, not three quarters of them: 0.75 of a phone is blurry,
+// and the scale comes down anyway if the phone can't keep up)
+const dynMax = controls.coarse && quality === "low" ? 1 / 0.75 : 1;
+const dyn = { frames: [], scale: dynMax, ceiling: dynMax, ceilingFor: 0, calm: 0 };
+renderer.resolutionScale = dynMax; renderer.resize();
+/** the control for an action as this player knows it: a key ("E"), or the touch button ("Use") */
+const TOUCH = { interact: "Use", jump: "Jump", cycle: "Seed", steer: "the stick (push it up to dive)" };
+function hint(id) { return controls.coarse ? TOUCH[id] ?? "" : keyHint(settings.bindings, id); }
+document.documentElement.classList.toggle("touch", controls.coarse);
+function keepFrameRate(dt) {
+    if (!settings.dynamicResolution || shot || document.hidden) { if (renderer.resolutionScale !== dynMax && !settings.dynamicResolution) { renderer.resolutionScale = dynMax; dyn.scale = dynMax; renderer.resize(); } return; }
+    if (dt > 0.25) return; // a stall (a tab switch, a load), not the frame rate
+    const f = dyn.frames; f.push(dt);
+    if (f.length < 60) return;
+    const sorted = f.slice().sort((a, b) => a - b), median = sorted[30], p90 = sorted[54];
+    f.length = 0;
+    dyn.ceilingFor = Math.max(0, dyn.ceilingFor - 1);
+    if (dyn.ceilingFor === 0) dyn.ceiling = dynMax;
+    if (median > 1 / 55 && dyn.scale > 0.55) {
+        dyn.ceiling = dyn.scale; dyn.ceilingFor = 30;
+        dyn.scale = Math.max(0.55, dyn.scale - (median > 1 / 40 ? 0.15 : 0.07));
+        dyn.calm = 0;
+    } else if (p90 < 1 / 58) {
+        if (++dyn.calm >= 6 && dyn.scale < dyn.ceiling) { dyn.scale = Math.min(dyn.ceiling, dyn.scale + 0.05); dyn.calm = 0; }
+    } else dyn.calm = 0;
+    if (renderer.resolutionScale !== dyn.scale) { renderer.resolutionScale = dyn.scale; renderer.resize(); }
+}
+
 game.onRender((dt, alpha) => {
     if (!window.__firstFrame) window.__firstFrame = performance.now();
+    keepFrameRate(dt);
     controls.look(dt);
     const p = state.player, a = alpha;
     // a jump of more than a few metres in one tick is a teleport (waking up): don't draw the path between
@@ -151,7 +276,7 @@ game.onRender((dt, alpha) => {
     pose.y = tele ? p.y : prev.y + (p.y - prev.y) * a;
     pose.z = tele ? p.z : prev.z + (p.z - prev.z) * a;
     pose.glide = p.mode === "glide" ? 1 : 0;
-    pose.yaw = p.yaw; pose.pitch = p.pitch; pose.roll = settings.reducedMotion ? p.roll * 0.3 : p.roll; pose.fx = p.fx; pose.fy = p.fy; pose.speed = p.speed;
+    pose.yaw = p.yaw; pose.pitch = p.pitch; pose.roll = comfort.reducedMotion ? p.roll * 0.3 : p.roll; pose.fx = p.fx; pose.fy = p.fy; pose.speed = p.speed;
     endingCamera(dt);
     if (shot) {
         // a fixed view: the engine's orbit camera, solved for this eye and target
@@ -159,7 +284,7 @@ game.onRender((dt, alpha) => {
         camera.mode = "orbit"; camera.target[0] = tx; camera.target[1] = ty; camera.target[2] = tz;
         camera.distance = d; camera.yaw = Math.atan2(dy, dx); camera.pitch = Math.asin(dz / d); camera.fov = shot.fov || 55; camera.roll = 0;
         rig.eye[0] = ex; rig.eye[1] = ey; rig.eye[2] = ez;
-    } else rig.update(dt, pose, controls.view, world, settings);
+    } else rig.update(dt, pose, controls.view, world, comfort);
     view3d.update(dt, state, pose, rig.eye);
     listen(dt);
     hud(dt);
@@ -273,13 +398,15 @@ function hud(dt) {
     const p = state.player, pouch = state.pouch;
     const does = p.does, sel = pouch.selected;
     let prompt = "";
-    if (does) prompt = `${keyHint(settings.bindings, "interact")}  ${DOES[does]}${does === "plant" ? " " + (NAMES[sel] || "").toLowerCase() : ""}`;
-    else if (p.mode === "foot" && !p.ground && p.hasGlider && p.air > 9) prompt = `${keyHint(settings.bindings, "jump")}  Open the glider`;
+    if (does) prompt = `${hint("interact")}  ${DOES[does]}${does === "plant" ? " " + (NAMES[sel] || "").toLowerCase() : ""}`;
+    else if (p.mode === "foot" && !p.ground && p.hasGlider && p.air > 9) prompt = `${hint("jump")}  Open the glider`;
     $("prompt").textContent = prompt;
     $("prompt").classList.toggle("on", !!prompt);
     const seeds = Object.entries(pouch.seeds).filter(([, n]) => n > 0).map(([c, n]) => `<span class="${c === sel ? "sel" : ""}">${NAMES[c]} seed ×${n}</span>`);
     const crops = Object.entries(pouch.crops).filter(([, n]) => n > 0).map(([c, n]) => `<span>${PRODUCE[c]} ×${n}</span>`);
     $("pouch").innerHTML = [...seeds, ...crops].join("") || "<span class='empty'>empty pouch</span>";
+    // the pouch steps aside while you glide (GDD §9)
+    $("pouch").classList.toggle("away", p.mode === "glide");
     const t = dayT(state), hours = (6 + t * 18) % 24;
     const w = state.weather, clock = (f) => { const h = (6 + f * 18) % 24; return String(Math.floor(h)).padStart(2, "0") + ":" + String(Math.floor((h % 1) * 60)).padStart(2, "0"); };
     const sky = w.kind === "rain" || w.kind === "storm" ? (t < w.rainFrom ? `${w.kind} at ${clock(w.rainFrom)}` : t < w.rainTo ? (w.kind === "storm" ? "storm" : "raining") : "clearing") : w.kind;
@@ -291,11 +418,15 @@ function hud(dt) {
     ring.style.setProperty("--f", String(frac));
     ring.classList.toggle("low", frac < 0.25);
     if (noticeTimer > 0 && (noticeTimer -= dt) <= 0) $("notice").classList.remove("on");
+    tutorial.show(hint, p);
 }
 
 // ------------------------------------------------------------------ test hook (the console, the tools)
 window.skyfarm = {
     game, world, view: view3d, rig, controls, sound, get state() { return state; },
+    store, settings, profile,
+    /** open a screen as the game would ("pause", "settings", ...): for tools/ui-test.mjs */
+    menu(name) { show(name); return screen; },
     /** start a fresh game */
     reset() { state = createState(world); },
     /** a demonstration garden: every crop at home (or in its own band's garden) at a spread of growth, for screenshots */
@@ -347,10 +478,44 @@ window.skyfarm = {
     },
     /** the post chain's settings, for tuning from the console */
     get post() { return renderer.postfx.settings; },
+    /** the resolution scale keeping 60 fps (keepFrameRate) */
+    get dyn() { return { ...dyn, frames: undefined, canvas: [renderer.canvas.width, renderer.canvas.height] }; },
     /** put the camera somewhere for a screenshot */
     look(x, y, z, yaw, pitch) { const p = state.player; p.x = x; p.y = y; p.z = z; controls.view.yaw = yaw; controls.view.pitch = pitch; },
     CROPS, GLIDE,
 };
+
+// ------------------------------------------------------------------ settings into effect
+const tutorial = new Tutorial(profile.tips, (text) => { $("goal").textContent = text; });
+const db = (v) => (v <= 0.001 ? -80 : 20 * Math.log10(v));
+/** Put the settings into effect and save the profile. Called at start and whenever one changes. */
+function applySettings(changed) {
+    comfort.reducedMotion = settings.reducedMotion ?? systemReducedMotion;
+    comfort.reducedRoll = settings.reducedRoll; comfort.reducedFov = settings.reducedFov;
+    document.documentElement.classList.toggle("reduce-motion", comfort.reducedMotion);
+    rig.baseFov = settings.fov;
+    view3d.setShadows(settings.shadows);
+    renderer.postfx.settings.bloom.enabled = settings.bloom;
+    if (!settings.dynamicResolution) { renderer.resolutionScale = dynMax; dyn.scale = dynMax; renderer.resize(); }
+    sound.levels.music = db(settings.music); sound.levels.sfx = -2 + db(settings.sfx); sound.levels.ambience = -3 + db(settings.ambience);
+    sound.setVolume(settings.volume);
+    sound.captions = settings.captions;
+    setCueScheme(settings.scheme);
+    document.documentElement.classList.remove("cues-redgreen", "cues-blueyellow");
+    if (settings.scheme !== "standard") document.documentElement.classList.add("cues-" + settings.scheme);
+    // (the menus zoom their panel, not the whole screen, so the panel can still fit it: style.css)
+    for (const id of ["hud", "talk"]) $(id).style.zoom = String(settings.textSize);
+    for (const id of ["title", "pause", "settings", "slots", "trade", "ending"]) $(id).querySelector(".panel").style.zoom = String(settings.textSize);
+    document.documentElement.style.setProperty("--zoom", String(settings.textSize));
+    state.assist = settings.assist;
+    controls.apply();
+    persist();
+    // a new quality tier rebuilds the world: save, then reload into it
+    if (changed === "quality" && !asked) { autosave(); store.storeProfile(profile); location.reload(); }
+}
+const menus = settingsScreen({ settings, controls, apply: applySettings, back: () => show(backTo) });
+gamepadMenus({ screen: () => screen, capturing: () => menus.capturing, back: (s) => { if (s === "settings" || s === "slots") show(backTo); else if (s === "pause") play(); } });
+applySettings();
 
 show("title");
 game.start();

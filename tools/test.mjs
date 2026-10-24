@@ -19,6 +19,9 @@ import { TALKS, STRINGS, talkTo } from "../game/dialogue.js";
 import { finishTalk } from "../game/sim.js";
 import { CROPS, DAY_TICKS, WEATHER } from "../game/data.js";
 import { STORM, stormAt, gustAt } from "../game/weather.js";
+import { SaveStore, snapshot, SAVE_VERSION } from "../game/save.js";
+import { Tutorial, STEPS } from "../game/tutorial.js";
+import { sleep } from "../game/sim.js";
 
 let failed = 0;
 const check = (ok, what) => { console.log((ok ? "  ok   " : "  FAIL ") + what); if (!ok) failed++; };
@@ -300,6 +303,61 @@ const world = makeWorld(WORLD);
         return s.pouch.materials.stormamber;
     };
     check(inStorm.planted && !outside.planted && outside.refused && amber(mid) === 1 && amber(mid - DAY_TICKS) === 0, "storm-bloom takes only when sown in a storm (and says so otherwise); storm-amber can be picked only while one blows");
+}
+
+// ---------------------------------------------------------------- the first five minutes (stage 8)
+{
+    // the pilot plays the first loop; the tutorial follows it from the game's own events, in order
+    const s = createState(world), pilot = makePilot(firstLoopPlan(world)), memory = { seen: [], done: false };
+    const lines = [], order = [];
+    const t = new Tutorial(memory, (text) => lines.push(text));
+    const at = (x, y, z) => islandUnder(world, x, y, z)?.id || "";
+    for (let k = 0; k < 60 * 600 && !pilot.done; k++) {
+        step(s, pilotInput(pilot, s));
+        const before = memory.seen.length;
+        t.events(s.events, at, s.player);
+        if (memory.seen.length > before) order.push(...memory.seen.slice(before));
+        t.show((id) => ({ interact: "E", jump: "Space", left: "A", right: "D", forward: "W" })[id], s.player);
+    }
+    // home, then to bed
+    sleep(s); t.events(s.events, at, s.player); s.events.length = 0;
+    for (let k = 0; k < 60 * 5; k++) { step(s, NO_INPUT); t.events(s.events, at, s.player); }
+    check(memory.done && memory.seen.join(",") === STEPS.join(",") && order.length === STEPS.length - 1, `the goal line follows the first loop step by step (${memory.seen.join(" → ")}), ${new Set(lines).size} lines, none longer than ${Math.max(...lines.map((l) => l.length))} characters`);
+}
+
+// ---------------------------------------------------------------- saving (stage 8)
+{
+    // a stand-in for localStorage, with a switch to make it refuse
+    class Mem { constructor() { this.m = new Map(); this.full = false; } getItem(k) { return this.m.has(k) ? this.m.get(k) : null; } setItem(k, v) { if (this.full) throw new Error("full"); this.m.set(k, String(v)); } removeItem(k) { this.m.delete(k); } }
+    const mem = new Mem(), store = new SaveStore(mem);
+    // a game a few days in: the first loop played, a bridge built, flags, sprites
+    const s = createState(world), pilot = makePilot(firstLoopPlan(world));
+    for (let k = 0; k < 60 * 400 && !pilot.done; k++) step(s, pilotInput(pilot, s));
+    s.progress.coins = 77; s.flags.add("pollinated"); s.progress.restored.add("daisy"); s.pouch.materials.fittings = 3;
+    check(store.save(1, s), "a game saves into slot 1");
+    const back = store.load(1, world);
+    const same0 = back && hashState(back) === hashState(s) && back.flags.has("pollinated") && back.progress.restored.has("daisy") && back.plots.size === s.plots.size;
+    // both step on the same: twenty seconds of the same random input
+    const r1 = makeRandom(3), r2 = makeRandom(3);
+    const inp = (r) => ({ mx: Math.round(r() * 254 - 127), my: Math.round(r() * 254 - 127), yaw: (r() * 65536) | 0, buttons: r() < 0.2 ? BTN.interact : 0 });
+    for (let k = 0; k < 60 * 20; k++) { step(s, inp(r1)); if (back) step(back, inp(r2)); }
+    check(same0 && hashState(back) === hashState(s), `loaded, it's the same game (${s.plots.size} plots, day ${Math.floor(s.tick / DAY_TICKS) + 1}), and 20 s later it still is`);
+    const size = JSON.stringify(snapshot(s)).length;
+    check(size < 200000, `a save is ${(size / 1024).toFixed(1)} KB`);
+    // crash safety: a torn main copy falls back to the last good one; a refusing storage says so and keeps the old
+    store.save(1, s);
+    mem.setItem("skyfarm-slot-1", "{\"version\":1,\"gam");
+    const torn = store.load(1, world);
+    mem.full = true;
+    const refused = store.save(2, s) === false && store.peek(2) === null;
+    mem.full = false;
+    check(!!torn && hashState(torn) !== 0 && refused, "a half-written save falls back to the backup; a full storage refuses cleanly");
+    // the profile: defaults filled in for fields an old profile didn't have
+    mem.setItem("skyfarm", JSON.stringify({ version: 1, settings: { sensitivity: 2 } }));
+    const p = store.profile();
+    check(p.settings.sensitivity === 2 && p.settings.captions === true && p.version === SAVE_VERSION && Array.isArray(p.tips.seen), "an old profile keeps its settings and gets every new one at its default");
+    // nothing stored at all (private mode): the game still starts
+    check(new SaveStore(null).profile().settings.volume === 0.8 && new SaveStore(null).save(0, s) === false, "with no storage the game plays on (and doesn't pretend it saved)");
 }
 
 console.log(failed ? `${failed} failed` : "all passed");
