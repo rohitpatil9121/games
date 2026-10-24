@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PAPER PLANES</title>
+<meta name="description" content="PAPER PLANES: fold a plane, ride the air of a giant room, and tag the one covered in ink. A browser game on the Projection Lab engine.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="view" tabindex="0" aria-label="The game view"></canvas>
+
+<section id="title" class="screen" aria-labelledby="title-h">
+  <div class="panel">
+    <h1 id="title-h">PAPER PLANES</h1>
+    <p class="tag">Fold a plane. Ride the air.</p>
+    <div class="row">
+      <label class="field">Your name <input id="name" maxlength="16" autocomplete="nickname" placeholder="Player"></label>
+      <label class="field">Fold <select id="fold"></select></label>
+    </div>
+    <fieldset class="row">
+      <legend>In the bedroom</legend>
+      <label>Mode <select id="p-mode"><option value="tag">Classic Tag</option><option value="spread">Ink Spread</option><option value="rings" selected>Ring Run</option></select></label>
+      <label>Set <select id="p-set"></select></label>
+      <label>Planes <select id="p-bots"></select></label>
+      <label>Bots <select id="p-skill"><option value="1">Easy</option><option value="2" selected>Normal</option><option value="3">Hard</option></select></label>
+    </fieldset>
+    <div class="buttons">
+      <button id="practice" class="primary">Practice</button>
+      <button id="quick">Quick play</button>
+      <button id="create">Create a room</button>
+    </div>
+    <form id="join-form" class="row">
+      <input id="code" maxlength="4" placeholder="Code" aria-label="Room code" autocomplete="off" spellcheck="false">
+      <button id="join" type="submit">Join</button>
+    </form>
+    <p id="server-status" class="small" role="status">Looking for a server…</p>
+  </div>
+</section>
+
+<section id="pause" class="screen" hidden aria-labelledby="pause-h">
+  <div class="panel">
+    <h2 id="pause-h">Paused <span class="small">(the room keeps flying)</span></h2>
+    <p id="room-line" class="small">Room <b id="room-code"></b> <button id="invite" class="link">Copy invite link</button></p>
+    <div class="buttons"><button id="resume" class="primary">Resume</button><button id="leave">Leave</button></div>
+    <details id="nettest">
+      <summary>Network test: add lag to your own link</summary>
+      <label>Ping <input id="net-latency" type="range" min="0" max="400" step="10" value="0"> <output id="net-latency-out"></output></label>
+      <label>Jitter <input id="net-jitter" type="range" min="0" max="100" step="5" value="0"> <output id="net-jitter-out"></output></label>
+      <label>Loss <input id="net-loss" type="range" min="0" max="10" step="1" value="0"> <output id="net-loss-out"></output></label>
+    </details>
+  </div>
+</section>
+
+<div id="hud" hidden>
+  <div id="labels" aria-hidden="true"></div>
+  <div id="aim" aria-hidden="true"></div>
+  <div id="arrow" aria-hidden="true" hidden><b></b><span></span></div>
+  <div id="stamp" aria-live="assertive" hidden></div>
+  <ol id="feed" aria-live="polite"></ol>
+  <section id="results" hidden aria-labelledby="results-title">
+    <h2 id="results-title"></h2>
+    <table><tbody id="results-body"></tbody></table>
+    <p id="results-next" class="small"></p>
+  </section>
+  <div id="ring" role="status"></div>
+  <ol id="players" aria-label="Planes in the room"></ol>
+  <div id="tip" role="note" aria-live="polite" hidden></div>
+  <div id="notice" role="status" hidden></div>
+  <div id="caption" aria-live="assertive"></div>
+  <div id="flap" aria-label="Flap charge"><i></i></div>
+  <pre id="debug" hidden></pre>
+  <p id="help">Mouse steers, Space or click flaps, W S A D also steer. 1 2 3: fold. R: restart. F3: numbers. Esc: menu.</p>
+</div>
+<script type="module" src="game/main.js"></script>
+</body>
+</html>
