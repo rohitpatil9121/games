@@ -98,6 +98,11 @@ output { min-width: 3.5em; font-variant-numeric: tabular-nums; }
 /* the goal line: what to do next, quietly, under the clock (onboarding) */
 #goal { position: absolute; top: calc(var(--safe-t) + 22px); left: var(--safe-l); font-size: 14px; max-width: min(360px, calc(100% - 200px)); opacity: 0.92; transition: opacity 0.6s; }
 #goal:empty { opacity: 0; }
+/* co-op */
+form.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+#coop input { font: inherit; padding: 6px 10px; border-radius: 8px; border: 2px solid #cfc6b0; width: 10em; text-transform: none; }
+#coop-code { text-transform: uppercase; width: 5em !important; letter-spacing: 0.15em; }
+#pause-coop b { letter-spacing: 0.15em; }
 
 /* cue colours (settings: colours for cues); the 3D cues follow gfx/cues.js */
 :root { --low: rgba(255, 140, 110, 0.95); }

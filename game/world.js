@@ -20,6 +20,8 @@ import { stormAt } from "./weather.js";
 import { islandUnder } from "./islands.js";
 import { rainGeometry, rainMaterial } from "./gfx/rain.js";
 import { CUES } from "./gfx/cues.js";
+/** who a co-op player looks like, by id: 1 the gardener (the host, or anyone alone), then three guest outfits */
+const lookFor = (id) => (id <= 1 ? "gardener" : "guest" + (((id - 2) % 3) + 1));
 import { makeRandom } from "./det.js";
 
 /**
@@ -160,6 +162,10 @@ export class World {
 
         // the player
         this.player = new Character("gardener", pm);
+        this.charMaterial = pm;
+        /** co-op: the other gardeners to draw this frame (main.js sets it from net.js Client.others()) */
+        this.others = [];
+        this.otherViews = new Map();
         this.body = add(this.player.root);
         this.canopy = add(new Entity({ name: "canopy", mesh: new Mesh(canopyGeometry(), propMaterial(false)) }));
         this.canopyOpen = 0;
@@ -314,6 +320,7 @@ export class World {
             this.canopy.setScale(0.4 + 0.6 * o, 0.1 + 0.9 * o, 0.4 + 0.6 * o);
         }
 
+        this.drawOthers(dt);
         this.drawFarm(state);
         drawSprites(this.spriteMesh, state, this.time, 0);
         this.drawRain(state, eye, dt);
@@ -409,6 +416,50 @@ export class World {
         const d = 150 + this._r() * 900;
         shared.u_flash = 1 * (1 - d / 1400);
         if (this.onThunder) this.onThunder(d);
+    }
+
+    /** Dress this player as their co-op id says (the host is the gardener; guests have their own colours on every screen). */
+    setPlayerLook(id) {
+        const who = lookFor(id);
+        if (this.player.who === who) return;
+        this.root.remove(this.player.root);
+        this.player = new Character(who, this.charMaterial);
+        this.body = this.root.add(this.player.root);
+        this.body.interpolate = false;
+    }
+
+    /** The other gardeners (co-op): each a character in their own colours with a glider of their own, posed as the player is. */
+    drawOthers(dt) {
+        const seen = new Set();
+        for (const o of this.others) {
+            seen.add(o.id);
+            let v = this.otherViews.get(o.id);
+            if (!v) {
+                const c = new Character(lookFor(o.id), this.charMaterial);
+                const root = this.root.add(c.root); root.interpolate = false;
+                const canopy = new Entity({ name: "canopy", mesh: new Mesh(canopyGeometry(), this.canopy.mesh.material) });
+                canopy.interpolate = false; this.root.add(canopy);
+                v = { c, canopy, open: 0 };
+                this.otherViews.set(o.id, v);
+            }
+            const body = v.c.root, qb = body.rotation;
+            body.visible = !o.asleep;
+            if (o.glide) { quat.identity(qb); quat.rotateZ(qb, qb, o.yaw); quat.rotateY(qb, qb, 1.15 - o.pitch * 0.3); quat.rotateX(qb, qb, o.roll); }
+            else quat.setAxisAngle(qb, [0, 0, 1], Math.atan2(o.fy, o.fx));
+            body.setPosition(o.x, o.y, o.z + (o.glide ? 0.25 : 0));
+            const ground = Math.hypot(o.vx || 0, o.vy || 0);
+            v.c.animate(dt, o.glide ? "glide" : ground > 0.3 ? "walk" : "idle", ground, 0);
+            v.open += ((o.glide ? 1 : 0) - v.open) * Math.min(1, dt * (o.glide ? 9 : 6));
+            v.canopy.visible = v.open > 0.03 && !o.asleep;
+            if (v.canopy.visible) {
+                const qc = v.canopy.rotation;
+                quat.identity(qc); quat.rotateZ(qc, qc, o.yaw); quat.rotateY(qc, qc, -o.pitch * 0.5); quat.rotateX(qc, qc, o.roll);
+                v.canopy.setPosition(o.x, o.y, o.z + 0.2 + 0.4 * v.open);
+                v.canopy.setScale(0.4 + 0.6 * v.open, 0.1 + 0.9 * v.open, 0.4 + 0.6 * v.open);
+            }
+        }
+        // whoever has left
+        for (const [id, v] of this.otherViews) if (!seen.has(id)) { v.c.root.visible = false; v.canopy.visible = false; if (!this.others.length) { this.root.remove?.(v.c.root); this.root.remove?.(v.canopy); this.otherViews.delete(id); } }
     }
 
     /** fireflies over the restored grass at night, round the camera */

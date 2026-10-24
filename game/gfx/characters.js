@@ -31,6 +31,10 @@ export const CAST = {
     mabel: { height: 0.95, width: 1.22, tunic: [0.45, 0.58, 0.4], skirt: true, trousers: [0.5, 0.45, 0.38], boots: [0.36, 0.26, 0.18], hair: [0.55, 0.3, 0.18], hat: "bee", apron: [0.98, 0.86, 0.45] },
     tor: { height: 1.1, width: 1.2, tunic: [0.42, 0.32, 0.24], trousers: [0.3, 0.26, 0.22], boots: [0.24, 0.18, 0.14], hair: [0.75, 0.74, 0.72], beard: [0.82, 0.82, 0.8], hat: "fur", cane: true, old: true },
     iris: { height: 1.0, width: 0.92, tunic: [0.2, 0.25, 0.45], skirt: true, trousers: [0.2, 0.22, 0.35], boots: [0.2, 0.18, 0.22], hair: [0.14, 0.12, 0.16], longHair: true, glasses: true, stars: true, lantern: true },
+    // co-op guests: the gardener's build in their own colours, so each friend reads at a glance
+    guest1: { height: 1.0, width: 1.0, tunic: [0.4, 0.62, 0.3], trousers: [0.36, 0.3, 0.24], boots: [0.32, 0.22, 0.15], hair: [0.12, 0.1, 0.09], scarf: [0.95, 0.78, 0.25], hat: "straw", satchel: true },
+    guest2: { height: 0.96, width: 1.0, tunic: [0.55, 0.36, 0.66], trousers: [0.3, 0.28, 0.34], boots: [0.28, 0.2, 0.16], hair: [0.75, 0.45, 0.2], scarf: [0.3, 0.75, 0.72], longHair: true, satchel: true },
+    guest3: { height: 1.04, width: 1.0, tunic: [0.86, 0.52, 0.26], trousers: [0.3, 0.32, 0.4], boots: [0.3, 0.22, 0.16], hair: [0.86, 0.8, 0.6], scarf: [0.25, 0.42, 0.8], hat: "straw", satchel: true },
     bram: { height: 1.0, width: 1.3, tunic: [0.18, 0.27, 0.48], trousers: [0.28, 0.26, 0.3], boots: [0.2, 0.15, 0.12], hair: [0.85, 0.84, 0.8], beard: [0.9, 0.9, 0.88], hat: "captain", buttons: true },
 };
 

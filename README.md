@@ -66,14 +66,31 @@ The game saves itself every time you sleep, every three minutes of play, and whe
 more slots are yours (Pause → Save or load). Saves live in the browser (localStorage), versioned, and
 written so that a crash mid-write leaves the previous save intact. Private windows may not keep them.
 
+## Playing together
+
+Up to four gardeners on one farm. On the title screen, **Play together**: the host presses *Host my farm*
+and gets a four-letter code; friends type it and *Join*. Everyone plays on the host's farm: the farm, the
+pouch, coins, bridges and the glider's upgrades are shared; each has their own body, stamina, meal and
+selected seed, and their own conversations. The night passes when everyone is in bed. Only the host's farm
+is saved (every 30 s and every morning, into the host's autosave); a guest's own farm waits untouched. When
+the host leaves, the farm closes and the guests go back to their own.
+
+It needs the SKYFARM server (`npm start`); on a static host such as itch.io the button doesn't show.
+
 ## How to run it
+
+```bash
+npm install
+```
 
 ```bash
 npm start
 ```
 
-Then open http://localhost:8160. Any static file server works (the page is plain ES modules, no build).
-`?quality=low|medium|high` overrides the quality setting.
+Then open http://localhost:8160. `npm start` is the game and its co-op server in one (Node 18 or later; one
+dependency, `ws`). Without co-op, any static file server works (`npm run static`; the page is plain ES
+modules, no build). `?quality=low|medium|high` overrides the quality setting. To host co-op for others,
+run the server where they can reach it (`PORT` sets the port) and share the address.
 
 An itch.io build: `node tools/build-itch.mjs` writes `dist/skyfarm-web/` and `dist/skyfarm-itch.zip`
 (index.html at the root). Nothing is uploaded.
@@ -99,6 +116,9 @@ the same modules run in the browser and in Node.
 - **Sound** (`game/sound.js`): Web Audio buses with ducking and a limiter; synthesised wind, rain, thunder,
   birds, the airship's horn, an adaptive piano and strings score; ZzFX effects and eight Kenney CC0 files.
 - **Saving** (`game/save.js`), **menus** (`game/menus.js`), **the first five minutes** (`game/tutorial.js`).
+- **Co-op** (`server/`, `game/net.js`, `game/protocol.js`): the room runs the same simulation and is the
+  authority; each client predicts its own player and farm actions and is corrected by snapshots at 20 Hz; the
+  others are interpolated; the world goes out when it changes; messages are deflate-compressed JSON.
 
 `GDD.md` is the design (with the art direction), `NOTES.md` the log of each stage (skills used, which three.js
 techniques were ported and how, what was measured), `QA.md` the release checklist and test report,
@@ -133,6 +153,8 @@ On this machine's integrated laptop GPU (the target in GDD §11), headless Chrom
 | `node tools/sound-mix.mjs` | the mix per situation, RMS and peak in dBFS |
 | `node tools/shots.mjs` | the marketing screenshots |
 | `node tools/build-itch.mjs` | the itch.io folder and zip |
+| `npm run test:net` (`-- 300 80 8`) | co-op in Node: a room and three clients through a simulated bad link (latency, jitter, loss): prediction, shared planting, growth, sleep, talks, the host's saves, the host leaving; bandwidth |
+| `npm run coop` | co-op in two real browser pages through the real server: host, join by code, see each other, walk, the host's save, the host leaving |
 
 ## Known issues and next updates
 
@@ -141,8 +163,8 @@ listened to, and the synthesised piano is thin; no phone frame-rate number; Medi
 1280 × 720 on this GPU (the adaptive resolution covers it); the Crown's great tree is too small for the
 ending; the High Rocks' tops read patchy.
 
-Next updates: a hand-drawn map and the journal; co-op for up to four players (stage 9, the TIDEFALL/BREACH
-netcode, the host's save as the authority); CC0 piano and string samples for the score (a download, so
+Next updates: a hand-drawn map and the journal; names over the other gardeners' heads and a way to wave;
+CC0 piano and string samples for the score (a download, so
 only if wanted); seasons; decorating the hut; more bands of sky.
 
 Rendering that should move into Projection Lab, so the next game gets it for free:

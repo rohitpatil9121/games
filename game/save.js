@@ -25,13 +25,13 @@ import { DAY_TICKS } from "./data.js";
  * @module game/save
  */
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const SLOTS = 3;
 const PROFILE = "skyfarm";
 const slotKey = (n) => `skyfarm-slot-${n}`;
 
 /** state fields that are derived, or only for this tick */
-const SKIP = new Set(["world", "events", "air"]);
+const SKIP = new Set(["world", "events", "air", "player", "remote"]);
 
 export function defaultSettings() {
     return {
@@ -47,8 +47,11 @@ export function defaultProfile() {
     return { version: SAVE_VERSION, settings: defaultSettings(), tips: { seen: [], done: false }, last: 0 };
 }
 
-/** Old shapes to new: each step takes a record one version on. (Version 1 is the first.) */
-export const MIGRATIONS = {};
+/** Old shapes to new: each step takes a record one version on. */
+export const MIGRATIONS = {
+    // v1 (stage 8): one player, saved as `player`; v2 (stage 9, co-op) keeps `players`, the host first
+    1: (r) => ({ ...r, version: 2, ...(r.game && !r.game.players && r.game.player ? { game: { ...r.game, players: [r.game.player] } } : {}) }),
+};
 
 // ------------------------------------------------------------------ the game as JSON
 
@@ -77,6 +80,24 @@ export function snapshot(state) {
 }
 
 /**
+ * The shared world for co-op (room.mjs sends it): the game without its players (each client has its own body
+ * from the snapshots) and without the sprites (they ride in every snapshot).
+ */
+export function worldSnapshot(state) {
+    const out = {};
+    for (const k in state) if (!SKIP.has(k) && k !== "players" && k !== "sprites") out[k] = encode(state[k]);
+    return out;
+}
+/** Lay a world snapshot over a client's copy, keeping its players; returns the snapshot's tick. */
+export function applyWorld(state, snap) {
+    const w = decode(snap);
+    for (const k in w) state[k] = w[k];
+    state.air = activeAir(state.world, state.progress.restored);
+    state.weather = weatherOf(state.seed, Math.floor(state.tick / DAY_TICKS) + 1);
+    return state.tick;
+}
+
+/**
  * A game from a snapshot: a fresh game for this world, with every saved field laid over it (objects merged a
  * level deep, so a field added since the save keeps its new default).
  */
@@ -95,6 +116,12 @@ export function revive(world, snap) {
         } else state[k] = v;
     }
     state.events = [];
+    // the host is the first player; guests are never in a save (co-op hands back the host alone)
+    state.players = (state.players || []).slice(0, 1);
+    if (!state.players.length) state.players = [state.player];
+    state.player = state.players[0];
+    if (!state.player.id) state.player.id = 1;
+    state.player.asleep = false;
     state.air = activeAir(world, state.progress.restored);
     state.weather = weatherOf(state.seed, Math.floor(state.tick / DAY_TICKS) + 1);
     return state;
@@ -156,6 +183,16 @@ export class SaveStore {
             savedAt: Date.now(), day: Math.floor(state.tick / DAY_TICKS) + 1, coins: state.progress.coins, restored: state.progress.restored.size,
             game: snapshot(state),
         });
+    }
+    /** save a game already in snapshot form (the co-op host's farm, as the room hands it back) */
+    saveSnapshot(n, game) {
+        const P = game.progress || {}, restored = P.restored && P.restored.$set ? P.restored.$set.length : 1;
+        return this.write(slotKey(n), { savedAt: Date.now(), day: Math.floor((game.tick || 0) / DAY_TICKS) + 1, coins: P.coins || 0, restored, game });
+    }
+    /** a slot's raw snapshot (to host a co-op farm from), or null */
+    raw(n) {
+        const r = this.read(slotKey(n));
+        return r && r.game ? this._migrate(r).game : null;
     }
     /** a slot's game, revived for this world, or null */
     load(n, world) {

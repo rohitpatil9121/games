@@ -6,6 +6,7 @@ code. Nothing was downloaded for SKYFARM: every file below was copied from the a
 
 | Name | Version | License | Source | Purpose | Location |
 |---|---|---|---|---|---|
+| ws | 8.22.0 | MIT | https://github.com/websockets/ws | The co-op server's WebSockets | `node_modules/ws` (server only; copied from TIDEFALL's folder, `npm install` fetches it on a fresh checkout) |
 | gl-matrix | 3.4.4 | MIT | https://github.com/toji/gl-matrix | Model transforms | `vendor/gl-matrix@3.4.4/` |
 | ZzFX | 1.3.2 | MIT | https://github.com/KilledByAPixel/ZzFX | Procedural sound-effect samples | `vendor/zzfx@1.3.2/` |
 | Space Grotesk (font) | variable, latin subset | SIL OFL 1.1 | https://github.com/floriankarsten/space-grotesk | Interface text | `vendor/fonts/` |
@@ -48,5 +49,6 @@ with Web Audio in `game/sound.js`.
 | Single-scattering sky (Rayleigh, Mie, ozone) | Nishita et al. (1993); Earth coefficients as in Bruneton & Neyret (2008) | `game/gfx/atmosphere.js` |
 | Utility AI with response curves | Dave Mark, "Behavioral Mathematics for Game AI" (2009) | `game/gfx/creatures.js` |
 | Value noise, fractal sums | Perlin (1985) and common practice | `game/gfx/`, `game/islands.js` |
+| Prediction, reconciliation, interpolation | Bernier (2001); Gambetta, "Fast-Paced Multiplayer" (2014), after BREACH and TIDEFALL | `game/net.js`, `server/room.mjs` |
 | Lookahead audio scheduling | Chris Wilson, "A Tale of Two Clocks" (2013) | `game/sound.js` |
 | Trauma-based camera shake | Squirrel Eiserloh, GDC 2016 (in the engine's Juice) | `engine/Juice.js` |

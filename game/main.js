@@ -7,7 +7,8 @@ import { createState, step, dayT, dayNumber } from "./sim.js";
 import { World } from "./world.js";
 import { Rig } from "./camera.js";
 import { Controls, defaultBindings, keyHint, ACTIONS } from "./controls.js";
-import { SaveStore } from "./save.js";
+import { SaveStore, snapshot } from "./save.js";
+import { Client, SocketTransport } from "./net.js";
 import { Tutorial } from "./tutorial.js";
 import { settingsScreen, slotsScreen, gamepadMenus } from "./menus.js";
 import { setCueScheme } from "./gfx/cues.js";
@@ -78,6 +79,8 @@ sound.onCaption = (text, seconds) => { $("caption").textContent = text; $("capti
 
 // ------------------------------------------------------------------ screens
 let screen = "title", backTo = "title";
+/** the console hook's run() is stepping the game (tools: on any screen) */
+let ticking = false;
 /** a game has started this visit (so there is something to save) */
 let started = false;
 function show(name) {
@@ -87,15 +90,17 @@ function show(name) {
     $("pause").hidden = name !== "pause";
     $("settings").hidden = name !== "settings";
     $("slots").hidden = name !== "slots";
+    $("coop").hidden = name !== "coop";
     $("trade").hidden = name !== "trade";
     $("talk").hidden = name !== "talk";
     $("ending").hidden = name !== "ending";
-    $("hud").hidden = name === "title" || ((name === "settings" || name === "slots") && backTo === "title");
+    $("hud").hidden = name === "title" || name === "coop" || ((name === "settings" || name === "slots") && backTo === "title");
     controls.active = name === "play";
     controls.showTouch(name === "play");
     if (name !== "play") for (const code of [...input.down]) input.release(code);
     // focus where a keyboard or gamepad player expects it
-    const first = { title: "start", pause: "resume", settings: "settings-back", slots: "slots-back", trade: "trade-close", ending: "ending-close" }[name];
+    const first = { title: "start", pause: "resume", settings: "settings-back", slots: "slots-back", coop: client ? "coop-back" : "coop-host", trade: "trade-close", ending: "ending-close" }[name];
+    if (name === "pause") pauseCoop();
     if (first) $(first).focus({ preventScroll: true });
     if (name === "settings") $("settings").querySelector(".panel").scrollTop = 0;
     if (name === "title") titleButtons();
@@ -109,7 +114,8 @@ function play() { started = true; show("play"); lockMouse(); canvas.focus(); }
 // ------------------------------------------------------------------ saving: the autosave on sleep, every few minutes and on leaving
 let sinceSave = 0;
 function autosave() {
-    if (!started) return true;
+    // in co-op the room hands the host its farm (the "save" message); a guest's own farm waits untouched
+    if (!started || client) return true;
     sinceSave = 0;
     const ok = store.save(0, state);
     if (!ok) notice("Couldn't save: the browser's storage is full or blocked.");
@@ -158,7 +164,7 @@ $("new-game").addEventListener("click", () => {
 });
 $("resume").addEventListener("click", play);
 $("touch-pause").addEventListener("click", () => { if (screen === "play") show("pause"); });
-$("to-title").addEventListener("click", () => { autosave(); show("title"); });
+$("to-title").addEventListener("click", () => { if (client) leaveCoop("You left the farm."); autosave(); show("title"); });
 const slots = slotsScreen({ store, canSave: () => started && backTo === "pause", save: (n) => store.save(n, state), load: loadSlot, back: () => show(backTo) });
 $("open-load").addEventListener("click", () => { show("slots"); slots.open(); });
 $("open-save").addEventListener("click", () => { show("slots"); slots.open(); });
@@ -171,13 +177,21 @@ addEventListener("keydown", (e) => {
 canvas.addEventListener("click", () => { if (screen === "play" && !document.pointerLockElement) lockMouse(); });
 
 // ------------------------------------------------------------------ the loop
+/** the menus that stop the clock when playing alone (in co-op the farm keeps going for the others) */
+const STOPS = new Set(["title", "pause", "settings", "slots", "coop"]);
 game.onUpdate(() => {
+    if (STOPS.has(screen) && !(client && client.joined) && !ticking) return;
     const p = state.player;
     prev.x = p.x; prev.y = p.y; prev.z = p.z; prev.yaw = p.mode === "glide" ? p.yaw : Math.atan2(p.fy, p.fx);
     let inp;
-    if (pilot) { inp = pilotInput(pilot, state); if (pilot.done) pilot = null; }
+    if (pilot && !client) { inp = pilotInput(pilot, state); if (pilot.done) pilot = null; }
     else { inp = controls.gather(); inp.yaw = quantizeYaw(controls.view.yaw); }
-    step(state, inp);
+    if (client && client.joined) {
+        // co-op: predicted on this client's copy, then what the room says happened (net.js EVENTS)
+        const own = client.tick(inp).slice(), theirs = client.takeEvents().filter((e) => !e.by || e.by === client.id || OTHERS_SHOW.has(e.type));
+        state = client.local;
+        state.events = own.concat(theirs);
+    } else step(state, inp);
     for (const e of state.events) onEvent(e);
     if (tutorial.events(state.events, (x, y, z) => islandUnder(world, x, y, z)?.id || "", state.player)) persist();
     if (input.wasPressed("pause") && screen === "play") show("pause");
@@ -220,6 +234,8 @@ function onEvent(e) {
     else if (e.type === "sprout") notice(`Your ${NAMES[e.crop].toLowerCase()} has sprouted`);
     else if (e.type === "fell" || e.type === "slept") fade(e.type === "fell" ? "You wake up at home." : `Day ${dayNumber(state)}`);
     if (e.type === "slept") autosave();
+    if (e.type === "waiting") notice(e.n === 1 ? "In bed. Waiting for one more gardener." : `In bed. Waiting for ${e.n} more gardeners.`);
+    if (client && e.by && e.by !== client.id && ["restored", "bridge-built", "upgraded"].includes(e.type) && client.names.get(e.by)) notice(`${client.names.get(e.by)}: ${$("notice").textContent}`);
     else if (e.type === "not-tired") notice("Not tired yet. Come back after noon.");
     else if (e.type === "tired") notice("Out of breath: the glider is only a parachute now. Land and rest.");
     else if (e.type === "land" && e.hard && !comfort.reducedMotion) game.juice.shake(0.25);
@@ -269,6 +285,7 @@ game.onRender((dt, alpha) => {
     if (!window.__firstFrame) window.__firstFrame = performance.now();
     keepFrameRate(dt);
     controls.look(dt);
+    if (client) { client.frame(dt); view3d.others = client.joined ? client.others() : []; } else if (view3d.others.length) view3d.others = [];
     const p = state.player, a = alpha;
     // a jump of more than a few metres in one tick is a teleport (waking up): don't draw the path between
     const tele = Math.abs(p.x - prev.x) + Math.abs(p.y - prev.y) > 5;
@@ -276,6 +293,8 @@ game.onRender((dt, alpha) => {
     pose.y = tele ? p.y : prev.y + (p.y - prev.y) * a;
     pose.z = tele ? p.z : prev.z + (p.z - prev.z) * a;
     pose.glide = p.mode === "glide" ? 1 : 0;
+    // (co-op: the correction from the room's word fades over a moment instead of jumping)
+    if (client && client.joined) { pose.x += client.offset.x; pose.y += client.offset.y; pose.z += client.offset.z; }
     pose.yaw = p.yaw; pose.pitch = p.pitch; pose.roll = comfort.reducedMotion ? p.roll * 0.3 : p.roll; pose.fx = p.fx; pose.fy = p.fy; pose.speed = p.speed;
     endingCamera(dt);
     if (shot) {
@@ -312,9 +331,12 @@ function nextLine() {
     if (++talk.i < talk.lines.length) { showLine(); return; }
     const t = talk;
     talk = null; view3d.talking = "";
-    finishTalk(state, t.who);
-    for (const e of state.events) onEvent(e);
-    state.events.length = 0;
+    if (client) client.talk(t.who);
+    else {
+        finishTalk(state, t.who);
+        for (const e of state.events) onEvent(e);
+        state.events.length = 0;
+    }
     if (screen === "talk") { if (t.thenTrade) openTrade(); else play(); }
 }
 addEventListener("keydown", (e) => { if (screen === "talk" && ["KeyE", "Space", "Enter"].includes(e.code)) { e.preventDefault(); nextLine(); } else if (screen === "talk" && e.code === "Escape") { talk = null; view3d.talking = ""; play(); } });
@@ -358,7 +380,8 @@ function fillTrade() {
 $("trade").addEventListener("click", (e) => {
     const b = e.target instanceof HTMLElement && e.target.closest("button");
     if (!b) return;
-    if (b.dataset.sell) sell(state, b.dataset.sell, Number(b.dataset.n));
+    if (client && (b.dataset.sell || b.dataset.buy)) client.trade(b.dataset.sell ? "sell" : "buy", b.dataset.sell || b.dataset.buy, Number(b.dataset.n));
+    else if (b.dataset.sell) sell(state, b.dataset.sell, Number(b.dataset.n));
     else if (b.dataset.buy) buy(state, b.dataset.buy, Number(b.dataset.n));
     else if (b.id === "trade-close") { play(); return; }
     sound.play("coins");
@@ -425,6 +448,8 @@ function hud(dt) {
 window.skyfarm = {
     game, world, view: view3d, rig, controls, sound, get state() { return state; },
     store, settings, profile,
+    /** the co-op connection (net.js), or null */
+    get client() { return client; },
     /** open a screen as the game would ("pause", "settings", ...): for tools/ui-test.mjs */
     menu(name) { show(name); return screen; },
     /** start a fresh game */
@@ -464,8 +489,12 @@ window.skyfarm = {
     talk(who) { openTalk(who); return talk && talk.lines; },
     /** let the test pilot play the first loop */
     autopilot() { pilot = makePilot(firstLoopPlan(world)); return true; },
-    /** Run the game by hand for some seconds (the Browser pane may throttle requestAnimationFrame). */
+    /** Run the game by hand for some seconds (the Browser pane may throttle requestAnimationFrame); it runs on any screen. */
     run(seconds) {
+        ticking = true;
+        try { this._run(seconds); } finally { ticking = false; }
+    },
+    _run(seconds) {
         const L = game.loop, raf = L._raf; L._raf = () => 0; let t = performance.now();
         for (let i = 0; i < seconds * 60; i++) { t += 1000 / TICK_RATE; L._hiddenPause = false; L.tick(t); }
         L._raf = raf; L._last = performance.now();
@@ -484,6 +513,74 @@ window.skyfarm = {
     look(x, y, z, yaw, pitch) { const p = state.player; p.x = x; p.y = y; p.z = z; controls.view.yaw = yaw; controls.view.pitch = pitch; },
     CROPS, GLIDE,
 };
+
+// ------------------------------------------------------------------ co-op (net.js, server/): host this farm, or join one by its code
+/** what the others do that this player is told about (their own pick-ups and landings aren't news) */
+const OTHERS_SHOW = new Set(["restored", "bridge-built", "build-start", "upgraded", "ending", "slept", "sold", "bought"]);
+/** @type {Client | null} */
+let client = null;
+const wsUrl = () => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+// co-op shows only when the page came from a SKYFARM server (not a static host such as itch.io)
+fetch("/status", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s && s.game === "skyfarm") { $("open-coop").hidden = false; if (screen === "title") titleButtons(); } }).catch(() => {});
+$("open-coop").addEventListener("click", () => { $("coop-name").value = profile.name || ""; $("coop-status").textContent = ""; show("coop"); });
+$("coop-back").addEventListener("click", () => show("title"));
+$("coop-name").addEventListener("change", () => { profile.name = $("coop-name").value.trim().slice(0, 16); persist(); });
+const coopName = () => (profile.name = $("coop-name").value.trim().slice(0, 16) || profile.name || "Gardener");
+$("coop-host").addEventListener("click", () => {
+    // the farm to host: the one being played, else the autosave, else a new one
+    if (started) autosave();
+    const game = store.raw(0) || snapshot(createState(world, { assist: settings.assist }));
+    joinCoop({ name: coopName(), create: { game } });
+});
+$("coop-join-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const code = $("coop-code").value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 4);
+    if (code.length !== 4) { $("coop-status").textContent = "A farm code is four letters."; $("coop-code").focus(); return; }
+    if (started) autosave();
+    joinCoop({ name: coopName(), room: code });
+});
+$("coop-leave").addEventListener("click", () => leaveCoop("You went home to your own farm."));
+function joinCoop(hello) {
+    persist();
+    $("coop-status").textContent = "Connecting…";
+    const c = new Client(world);
+    client = c;
+    c.on("welcome", () => {
+        $("coop-status").textContent = "";
+        state = c.local;
+        view3d.setPlayerLook(c.id);
+        const p = state.player;
+        prev.x = p.x; prev.y = p.y; prev.z = p.z;
+        view3d.stream.settle([p.x, p.y, p.z + 2]);
+        tutorial.skipFor(state);
+        play();
+        notice(c.id === c.host ? `Your farm is open. Friends join with the code ${c.code}.` : `You're on ${c.names.get(c.host) || "the host"}'s farm.`);
+    });
+    // the host keeps the farm the room hands back (and so do the slots' autosave)
+    c.on("save", (game) => { if (c.id === c.host && !store.saveSnapshot(0, game)) notice("Couldn't save: the browser's storage is full or blocked."); });
+    c.on("world", () => { if (screen === "trade") fillTrade(); });
+    c.on("roster", (m) => { if (screen === "pause") pauseCoop(); if (c.joined && m.players.length > c.names.size) notice("A gardener has joined."); });
+    c.on("close", (e) => { if (client === c) leaveCoop(e.reason || "The connection was lost.", !e.was); });
+    c.connect(new SocketTransport(wsUrl()), hello);
+}
+/** Back to this player's own farm (the autosave, which for a host now holds the shared farm's last save). */
+function leaveCoop(reason, neverJoined = false) {
+    const c = client;
+    client = null;
+    if (c) c.close();
+    view3d.others = [];
+    view3d.setPlayerLook(1);
+    if (neverJoined) { $("coop-status").textContent = reason; if (screen !== "coop") show("coop"); return; }
+    begin(store.load(0, world) || createState(world, { assist: settings.assist }));
+    show("pause");
+    $("pause-status").textContent = reason;
+}
+function pauseCoop() {
+    const on = !!(client && client.joined);
+    $("pause-coop").hidden = !on; $("coop-leave").hidden = !on; $("open-save").hidden = on;
+    $("pause-note").textContent = on ? "The farm keeps going while you're in this menu: the others are still playing." : "Nothing grows or moves while you're away.";
+    if (on) $("pause-coop").innerHTML = `Farm code <b>${client.code}</b> · ${[...client.names.values()].join(", ")} (${client.names.size} of 4)${client.id === client.host ? " · you're the host: your farm is saved" : ""}`;
+}
 
 // ------------------------------------------------------------------ settings into effect
 const tutorial = new Tutorial(profile.tips, (text) => { $("goal").textContent = text; });

@@ -19,11 +19,29 @@
       <button id="start" class="primary">Wake up</button>
       <button id="new-game" hidden>Start a new farm</button>
       <button id="open-load">Load a saved farm</button>
+      <button id="open-coop" hidden>Play together</button>
       <button id="open-settings">Settings</button>
     </div>
     <p id="new-confirm" class="small" hidden role="alert">A new farm replaces the autosave (your three saved slots stay). Press again to start over.</p>
     <p class="small" id="title-keys"></p>
     <p class="small">Free, no ads. Keyboard and mouse, gamepad or touch.</p>
+  </div>
+</section>
+
+<section id="coop" class="screen" hidden aria-labelledby="coop-h">
+  <div class="panel">
+    <h2 id="coop-h">Play together</h2>
+    <p class="small">Up to four gardeners on one farm. The host's farm is the one you all play on, and only the host's is saved.</p>
+    <label class="line">Your name <input id="coop-name" maxlength="16" autocomplete="nickname" spellcheck="false"></label>
+    <div class="buttons col">
+      <button id="coop-host" class="primary">Host my farm</button>
+    </div>
+    <form id="coop-join-form" class="row">
+      <label class="line">Farm code <input id="coop-code" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD"></label>
+      <button id="coop-join" type="submit">Join</button>
+    </form>
+    <p id="coop-status" class="small" role="status"></p>
+    <div class="buttons"><button id="coop-back">Back</button></div>
   </div>
 </section>
 
@@ -96,10 +114,12 @@
 <section id="pause" class="screen" hidden aria-labelledby="pause-h">
   <div class="panel">
     <h2 id="pause-h">Paused</h2>
-    <p class="small">Nothing grows or moves while you're away.</p>
+    <p class="small" id="pause-note">Nothing grows or moves while you're away.</p>
+    <p id="pause-coop" class="small" hidden></p>
     <div class="buttons col">
       <button id="resume" class="primary">Back to the sky</button>
       <button id="open-save">Save or load</button>
+      <button id="coop-leave" hidden>Leave the farm</button>
       <button id="open-settings-2">Settings</button>
       <button id="to-title">Back to the title</button>
     </div>

@@ -498,3 +498,51 @@ screenshots, not a measurement.
 Honest notes: no person has played it for long, nobody has listened to the audio, and there is no phone to
 measure. Medium has no headroom at 1280 × 720 here. Not built from the GDD: the map, the journal,
 hold-to-toggle, the time-of-day arc, a name for the gardener. Stage 9 (co-op) needs your go-ahead first.
+
+## Stage 9: co-op (asked for on 2026-10-25)
+
+Built on the BREACH and TIDEFALL netcode (authoritative room, client prediction, reconciliation,
+interpolation, testing under simulated latency and loss, never only on localhost) and the `save-systems`
+approach from stage 8 (a version 2 save with a migration from 1). No new skill was loaded this stage.
+
+What was built:
+
+- `game/sim.js`: several players. `state.players` (the host first); `step(state, input)` still takes one input
+  for one player, and in co-op a Map of each player's inputs for the tick, stepping each player once per input
+  (the room's credit rules make that safe, and it's what lets a client predict itself exactly). Events carry
+  `by`. Shared: the farm, pouch, coins, bridges, progress, the glider's upgrades. Each player's own: body,
+  stamina, meal, the selected seed (falling back to the farm's when theirs has run out). The night passes when
+  everyone is in bed; falling wakes only the one who fell. Guests wake at the next free spot around the bed.
+- `game/save.js`: version 2 saves keep `players` (only the host is ever saved); version 1 saves migrate.
+  `worldSnapshot`/`applyWorld` for the room's world updates; `saveSnapshot`/`raw` for the host.
+- `server/server.mjs` (static files, `/ws`, `/status`, four-letter codes, 60 Hz) and `server/room.mjs` (the
+  authority: inputs with credit, 20 Hz snapshots, the world when it changes, saves to the host, talks and trades
+  checked against where the player is), after TIDEFALL's.
+- `game/protocol.js` (JSON, compressed by the socket), `game/net.js` (the client's copy of the farm, prediction
+  with its own farm actions for instant answers, quiet replays on reconciliation, world catch-up, interpolated
+  others, the transports and a bad-link simulator).
+- The page: Play together (host my farm / join by code / your name), the farm's code and who's here in the
+  pause menu, Leave the farm, notices when someone joins or builds; the others drawn in their own colours with
+  their own gliders, the same on every screen (the host is the gardener, guests have three outfits).
+- `ws` 8.22.0 copied from TIDEFALL's `node_modules` (nothing downloaded); `npm start` is now the server.
+
+Found and fixed on the way:
+
+- Guests woke inside the bed and the stove (the second and third spots beside the bed): now the next free spot.
+- A guest with nothing selected couldn't plant the farm's seeds.
+- Playing alone, the clock never stopped for the pause menu (it said it did): the pause, settings, saved-farm
+  and title screens now stop it; in co-op the farm keeps going for the others.
+- Each page drew its own gardener in the host's clothes, so friends saw different colours for the same person.
+
+Tests: `npm test` (all pass, single player unchanged), `tools/net-test.mjs` at 150 ms ± 30 with 3% late and at
+300 ms ± 80 with 8% late (all pass: exact prediction, shared planting, growth alike, sleep, talks validated,
+host saves, host leaving), `tools/coop-test.mjs` in real pages through the real server (all pass), the UI test,
+the playtest, the views (only the rain captures move, by the streaks' own noise).
+
+Measured: about 13–14 KB/s down per client as JSON with three players (about 7 KB/s deflated message by message,
+less with the socket's shared dictionary), 3.4 KB/s up.
+
+Honest notes: not played by people on separate machines or over the internet. No names over heads, no way to
+wave or chat. A tab in the background stops its gardener. A conversation's gift is checked against where the
+player is when it ends, so a guest who glides away before the last line loses it. The host's last 30 s are
+lost if their tab closes between saves.

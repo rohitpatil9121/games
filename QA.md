@@ -21,6 +21,8 @@ frame-rate number (no phone here).
 | `npm run playtest` | the first loop through real key presses: seed 0.8 s, plant 3.1 s, water 3.4 s, glider 6.0 s, open 10.0 s, land on Daisy Step 19.1 s, rope-grass seed 21.5 s | passes, 59 fps |
 | `npm run views` | the 6 baseline views at noon, golden hour and in rain (18 captures) against the locked baselines | every one within 1.1% of pixels changed (most 0.0%) after this stage's changes |
 | `node tools/errors.mjs 6 dist/skyfarm-web` | the itch build, served on its own | no console errors |
+| `npm run test:net` (stage 9) | co-op in Node through a simulated link: 150 ms ± 30, 3% late (and 300 ms ± 80, 8%): three join; a guest walking 12.7 m is predicted exactly (0.0 cm off at every snapshot, exactly on the room when stopped); a turnip one guest plants shows on every copy with the same seeds left; crops grow alike on every copy (6.9e-5 apart); two in bed don't end the day, the third does; a talk far from the hermit gives nothing, beside Ona it gives the shared pouch 3 seeds and only the talker is shown it; the host gets saves that load as a one-player farm; the host leaving closes the room and both guests are told | all pass |
+| `npm run coop` (stage 9) | two real pages through the real server: Play together shows; host, join by code; each draws the other; the guest walks 2.9 m and the host's page has her within 0 cm once she stops; the host's autosave is written; the host leaves and the guest is back on a farm of their own | all pass |
 
 **Harness decision:** yes, a visual harness (the 18 fixed views with baselines, plus the canvas metrics in
 `tools/views.mjs`); it caught a real regression this stage (weather left over between captures).
@@ -44,6 +46,7 @@ spots); rain, storm, night. Audio: unlocks on the first click or key; levels per
 | Streaming, a 5.4 km flight over the whole world at 45 m/s (four times a glider) | `npm run stream` | median frame 12.6 ms, 99th percentile 27.8 ms, worst 44.3 ms, 16 of 9,322 frames over 33 ms; longest single build step 29–53 ms (a tree's growth on a busy run); before this stage's fix the worst was 366 ms, from the water shader compiling the first time a pond came into view |
 | Memory with the whole world visited | `npm run stream` | islands' geometry 7–29 MB as tiers come and go (8–14 mid tiers, 2–6 near); JS heap 46–96 MB, saw-toothing with no growth over the flight |
 | A save | `npm test` | about 6 KB of JSON |
+| Co-op bandwidth, per client, three players (stage 9) | `npm run test:net` | down 13–14 KB/s as JSON, about 7 KB/s deflated message by message (ws keeps its dictionary across messages, so less on the wire); up 3.4 KB/s |
 | The mix | `node tools/sound-mix.mjs` | home -28 dB RMS, gliding -24 to -21, night -33, rain -22, storm -20; peaks -6 dB or lower |
 
 Budgets (GDD §11): Medium ≤ 16.6 ms is met at 1280 × 720 with no margin (16.0 ms at the hut door), and held
@@ -62,6 +65,8 @@ at 60 fps at any window size by the adaptive resolution; draw calls 90–118 (bu
   1280 × 720 viewport with fullscreen allowed. Not done: the author publishes.
 
 ## Known issues
+
+- **Co-op has only been tested by tools** (Node with a simulated link, and two headless pages on one machine), never by people on different machines or over the internet. A background tab stops sending input, so its gardener stands still for the others. The host's last 30 s are lost if the tab is closed between saves.
 
 - **Not played by a person for long.** The tests, the pilot and the playtest show the systems work; whether
   the first hour feels good, whether the goal line is enough, whether storms are fair, needs someone playing.

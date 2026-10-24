@@ -343,7 +343,21 @@ Utility AI, structured like TIDEFALL's bots.
   the autosave also runs when the page is hidden. A save is about 6 KB.)*
 - **Download and load:** no downloaded art (everything procedural), target under 3 MB and under 3 s to
   the first frame; memory measured with the whole world visited.
-- **Co-op:** only stage 9, only after you agree (TIDEFALL/BREACH netcode, host's save is authority).
+- **Co-op (stage 9, agreed 2026-10-25):** up to 4 players on the host's farm, through a small Node server
+  (`server/`, static files plus WebSockets, after TIDEFALL's). The room runs the same `game/sim.js` and is the
+  authority; the host's save is the world it starts from, and the room hands the host back a save every
+  30 s and on every sleep, so only the host's farm changes, and only in the host's own slots.
+  - *Shared:* the farm, the pouch, coins, materials, bridges, restored islands, the glider's upgrades, the day.
+    *Each player's own:* body, stamina, today's meal, the seed they have selected, conversations.
+  - *Sleep* skips the night only when everyone is in bed; a player in bed waits ("waiting for the others").
+  - *Falling* wakes only that player at home.
+  - *Conversations and trading* are each player's own screen; their gifts and sales go to the shared pouch.
+  - *Netcode:* each client predicts its own player (and its own farm actions, for instant feedback) and is
+    corrected by the room's snapshots at 20 Hz; the others are drawn 5 ticks behind, interpolated. The world
+    (plots, items, bridges, the pouch) is sent as a whole when it changes, at most 5 times a second, and every
+    5 s regardless; between those the client grows the crops itself with the same deterministic code.
+  - *Leaving:* a guest leaving changes nothing; the host leaving closes the room and sends the guests back to
+    their own farms. Without a server (a static host such as itch.io) the co-op buttons don't show.
 
 ## 12. Process
 

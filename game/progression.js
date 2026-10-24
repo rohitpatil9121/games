@@ -194,7 +194,8 @@ export function upgradeAvailable(state) {
 export function applyUpgrade(state) {
     const u = upgradeAvailable(state), p = state.player, P = state.progress;
     if (!u) return null;
-    if (u.kind === "tier") { state.pouch.materials[u.needs]--; P.tier = u.tier; p.glide = u.glide; p.staminaMax = u.stamina; p.stamina = u.stamina; }
+    // the farm's glider design: everyone's glider gets it
+    if (u.kind === "tier") { state.pouch.materials[u.needs]--; P.tier = u.tier; for (const q of state.players || [p]) { q.glide = u.glide; q.staminaMax = u.stamina; } p.stamina = u.stamina; }
     else { state.pouch.materials[BOOST.needs]--; P.boost = true; }
     state.events.push({ type: "upgraded", kind: u.kind, name: u.name, tier: P.tier });
     return u;

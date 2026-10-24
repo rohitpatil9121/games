@@ -95,7 +95,7 @@ export function farmDawn(state) {
         }
         plot.watered = false; plot.grew = false;
     }
-    state.player.meal = 0;
+    for (const p of state.players || [state.player]) p.meal = 0;
     state.weather = weatherOf(state.seed, Math.floor(state.tick / DAY_TICKS) + 1);
 }
 
@@ -161,7 +161,7 @@ export function clusters(state) {
 
 /** Sprites: come to clusters, hover, pollinate, scatter from a running player, leave when the flowers go. */
 export function stepSprites(state) {
-    const S = SPRITES, p = state.player;
+    const S = SPRITES;
     if (state.tick % 120 === 0) state.clusters = clusters(state);
     const cl = state.clusters || [];
     // arrivals: each cluster wants perCluster sprites; one comes in at a time, from 30 m off
@@ -175,7 +175,6 @@ export function stepSprites(state) {
             }
         }
     }
-    const running = Math.hypot(p.vx, p.vy) > 5 && p.mode === "foot";
     for (let i = state.sprites.length - 1; i >= 0; i--) {
         const s = state.sprites[i];
         s.t++;
@@ -184,8 +183,10 @@ export function stepSprites(state) {
         for (const c of cl) { const d = Math.hypot(c.x - s.x, c.y - s.y); if (d < bd) { bd = d; target = c; } }
         if (!target) { s.mode = "leave"; s.gone = (s.gone || 0) + 1; }
         else s.gone = 0;
-        // a running player scatters them for two seconds
-        const pd = Math.hypot(p.x - s.x, p.y - s.y);
+        // a running player scatters them for two seconds (the nearest one, in co-op)
+        let p = state.player, pd = Infinity;
+        for (const q of state.players || [state.player]) { const d = Math.hypot(q.x - s.x, q.y - s.y); if (d < pd) { pd = d; p = q; } }
+        const running = Math.hypot(p.vx, p.vy) > 5 && p.mode === "foot";
         if (running && pd < 3) { s.scared = 120; s.mode = "scared"; }
         let gx, gy, gz;
         if (s.scared > 0) {

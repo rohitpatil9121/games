@@ -57,6 +57,8 @@ export function createState(world, options = {}) {
         /** pollinator sprites, and the flower clusters they look for (farm.js) */
         sprites: [], nextSprite: 1, clusters: [],
         player: createPlayer(),
+        /** everyone on the farm (co-op, stage 9); players[0] is the host, and `player` is whoever is being stepped */
+        players: [],
         /** plots by "ix,iy" */
         plots: new Map(),
         items: d.items.map((it, i) => {
@@ -80,6 +82,8 @@ export function createState(world, options = {}) {
         /** "gentle skies" (the settings' assist): stamina drains 35% slower and storm gusts push half as hard */
         assist: !!options.assist,
     };
+    state.player.id = 1; state.player.name = options.name || "";
+    state.players.push(state.player);
     for (const [ix, iy] of d.tilled) state.plots.set(ix + "," + iy, makePlot(world, ix, iy));
     state.weather = weatherOf(state.seed, dayNumber(state));
     /** the air that blows: the gates' updrafts only once their islands are restored */
@@ -128,26 +132,91 @@ export const dayT = (state) => (state.tick % DAY_TICKS) / DAY_TICKS;
 export const dayNumber = (state) => Math.floor(state.tick / DAY_TICKS) + 1;
 
 /** Put the player in bed. */
+/** Everyone gets up at home (each a step to the side of the bed, so nobody stands inside another). */
 function wake(state) {
-    const p = state.player, w = state.world.data.wake, home = state.world.islands[0];
-    p.x = w.x; p.y = w.y; p.z = topAt(home, w.x, w.y);
+    state.players.forEach((p, i) => wakeOne(state, p, i));
+}
+function wakeOne(state, p, i = state.players.indexOf(p)) {
+    const w = state.world.data.wake, home = state.world.islands[0];
+    // the host wakes where they always have; each guest at the next free spot around it, on rings of 0.9 m
+    // (not inside the bed, the stove or a wall)
+    let x = w.x, y = w.y;
+    if (i > 0) {
+        let found = 0;
+        for (let r = 1; r <= 4 && found < i; r++) for (let a = 0; a < 8 && found < i; a++) {
+            const cx = w.x + dcos(w.yaw + a * 0.785398) * 0.9 * r, cy = w.y + dsin(w.yaw + a * 0.785398) * 0.9 * r, cz = topAt(home, cx, cy);
+            if (cz === -Infinity || blockedAt(state.world, cx, cy, cz) || blockedAt(state.world, cx, cy, cz + 0.4)) continue;
+            if (++found === i) { x = cx; y = cy; }
+        }
+    }
+    p.x = x; p.y = y; p.z = topAt(home, x, y); p.asleep = false;
     p.vx = p.vy = p.vz = 0; p.mode = "foot"; p.drift = false; p.ground = true; p.air = 0;
     p.fx = dcos(w.yaw); p.fy = dsin(w.yaw); p.stamina = staminaCap(p);
 }
 
-/** Advance the whole game one tick. */
+/**
+ * Advance the whole game one tick. `input` is one input for the only player (single player), or, in co-op, a
+ * Map from player id to the inputs that arrived for that player this tick: each player is stepped once per
+ * input (none, one, or a few late ones in a row), which is what lets a client predict itself exactly (the
+ * room's credit rules, server/room.mjs). Events a player causes carry `by`, the player's id.
+ */
 export function step(state, input = NO_INPUT) {
     state.events.length = 0;
+    stepWorld(state);
+    if (input instanceof Map) { for (const p of state.players) stepAs(state, p, input.get(p.id)); }
+    else stepAs(state, state.players[0], [input]);
+    state.player = state.players[0];
+    stepAfter(state);
+    return state;
+}
+/** the world's own clock: the day turning over, the crops growing */
+export function stepWorld(state) {
     const before = Math.floor(state.tick / DAY_TICKS);
     state.tick++;
     if (Math.floor(state.tick / DAY_TICKS) !== before) newDay(state);
     grow(state, 1);
-    stepPlayer(state, state.player, input);
-    stepSprites(state);
+}
+/** what follows the players: sprites, the pollinated flag, bridges going up */
+export function stepAfter(state) {
+    // (sprites are the room's to move in co-op: a client copies them from its snapshots)
+    if (!state.remote) stepSprites(state);
     if (state.events.some((e) => e.type === "pollinated")) state.flags.add("pollinated");
     stepBridges(state);
-    return state;
 }
+/** Step one player through a batch of inputs, as `state.player` (the farm code reads it), with their own seed selected. */
+export function stepAs(state, p, batch, quiet = false) {
+    if (!batch || !batch.length) return;
+    const pouch = state.pouch, shared = pouch.selected;
+    state.player = p;
+    // (their own seed if they have chosen one there are seeds of; otherwise the farm's)
+    if (state.players.length > 1 && p.selected && pouch.seeds[p.selected] > 0) pouch.selected = p.selected;
+    for (const inp of batch) {
+        const from = state.events.length;
+        stepPlayer(state, p, inp, quiet);
+        if (inp.seq !== undefined) p.seq = inp.seq;
+        for (let k = from; k < state.events.length; k++) state.events[k].by = p.id;
+    }
+    p.selected = pouch.selected;
+    if (state.players.length > 1 && p !== state.players[0]) pouch.selected = shared;
+}
+
+/** Someone joins the farm (co-op): at home by the bed, with the glider as upgraded so far. Returns the player. */
+export function addPlayer(state, id, name) {
+    const p = createPlayer(), host = state.players[0];
+    p.id = id; p.name = name || "Gardener";
+    p.hasGlider = !!(host && host.hasGlider);
+    if (host) { p.glide = host.glide; p.staminaMax = host.staminaMax; }
+    p.selected = state.pouch.selected;
+    state.players.push(p);
+    wakeOne(state, p);
+    p.stamina = staminaCap(p);
+    return p;
+}
+export function removePlayer(state, id) {
+    const i = state.players.findIndex((p) => p.id === id);
+    if (i > 0) state.players.splice(i, 1);
+}
+export const findPlayer = (state, id) => state.players.find((p) => p.id === id) || null;
 
 /** the stamina the glider has today: the glider's own, plus today's meal */
 export const staminaCap = (p) => p.staminaMax + (p.meal || 0);
@@ -179,9 +248,12 @@ export function sleep(state) {
 
 // ------------------------------------------------------------------ the player
 
-function stepPlayer(state, p, input) {
+/** One player, one tick. quiet: a replay of inputs already predicted (net.js): move, but don't act again. */
+export function stepPlayer(state, p, input, quiet = false) {
     const pressed = input.buttons & ~p.held;
     p.held = input.buttons;
+    // in bed waiting for the others: any move or jump gets you up again
+    if (p.asleep) { if (input.mx || input.my || (pressed & BTN.jump)) p.asleep = false; else { p.does = ""; return; } }
     if (pressed & BTN.jump) p.jumpAge = 0; else if (p.jumpAge < 99) p.jumpAge++;
     if (pressed & BTN.interact) p.actAge = 0; else if (p.actAge < 99) p.actAge++;
     if (p.actCool > 0) p.actCool--;
@@ -196,7 +268,7 @@ function stepPlayer(state, p, input) {
     if (p.mode === "foot") aim(state, p);
     else p.does = "";
     // after acting, aim again: what the next press would do has changed
-    if (p.mode === "foot" && p.actAge <= FARM.actBuffer && p.actCool === 0) { act(state, p); if (p.mode === "foot") aim(state, p); }
+    if (!quiet && p.mode === "foot" && p.actAge <= FARM.actBuffer && p.actCool === 0) { act(state, p); if (p.mode === "foot") aim(state, p); }
 }
 
 function stepFoot(state, p, input, pressed) {
@@ -411,7 +483,8 @@ function fell(state, p) {
         state.pouch.crops[c] = 0;
     }
     state.washed.push(...washed);
-    wake(state);
+    wakeOne(state, p);
+    p.stamina = staminaCap(p);
     state.events.push({ type: "fell", washed, lost });
 }
 
@@ -488,7 +561,13 @@ function act(state, p) {
     }
     if (does === "sleep") {
         if (dayT(state) < 0.5) { state.events.push({ type: "not-tired" }); return; }
-        sleep(state);
+        // the night passes when everyone is in bed (alone, at once)
+        p.asleep = true;
+        const all = state.players.every((q) => q.asleep);
+        if (!all) state.events.push({ type: "waiting", n: state.players.filter((q) => !q.asleep).length });
+        // (a co-op client's own copy never sleeps by itself: the room does, and its events are marked direct,
+        // so the client shows them although they're its own player's doing)
+        else if (!state.remote) { const from = state.events.length; sleep(state); for (let k = from; k < state.events.length; k++) state.events[k].direct = 1; }
         return;
     }
     if (does === "upgrade") { applyUpgrade(state); return; }
@@ -552,8 +631,8 @@ export function finishTalk(state, who) {
 export function hashState(state) {
     let h = 0x811c9dc5;
     const mix = (v) => { const s = String(v); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } };
-    const p = state.player;
-    for (const v of [state.tick, p.x, p.y, p.z, p.vx, p.vy, p.vz, p.mode, p.yaw, p.pitch, p.roll, p.speed, p.stamina]) mix(v);
+    mix(state.tick);
+    for (const p of state.players) for (const v of [p.id, p.x, p.y, p.z, p.vx, p.vy, p.vz, p.mode, p.yaw, p.pitch, p.roll, p.speed, p.stamina]) mix(v);
     for (const plot of state.plots.values()) mix(plot.ix + plot.iy * 1000 + plot.crop + plot.growth + plot.watered);
     for (const c of CROP_IDS) mix(state.pouch.seeds[c] + "/" + state.pouch.crops[c]);
     for (const s of state.sprites) mix(s.x + "," + s.y);
