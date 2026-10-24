@@ -1,0 +1,19 @@
+{
+  "name": "breach",
+  "private": true,
+  "type": "module",
+  "description": "BREACH: a multiplayer arena shooter built on Projection Lab",
+  "scripts": {
+    "start": "node server/server.mjs",
+    "static": "node tools/serve.mjs",
+    "test": "node tools/test.mjs && node tools/check-maps.mjs",
+    "test:online": "node tools/two-clients.mjs",
+    "test:net": "node tools/net-test.mjs",
+    "bots": "node tools/bot-match.mjs",
+    "waypoints": "node tools/make-waypoints.mjs",
+    "models": "node tools/make-models.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  }
+}

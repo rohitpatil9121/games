@@ -1,0 +1,127 @@
+/**
+ * FOUNDRY: indoor, 40 × 32 m. A walled pit room in the middle, a corridor all the way round it, a raised
+ * walkway along the north and south walls, and a bridge between them that crosses over the pit.
+ * The layout is its own mirror image turned half a circle, so neither end is the better one.
+ *
+ *            north walkway (z = 3) ───────────────────────────►
+ *      ┌──────────────────────────────────────────────────────┐
+ *      │  ramp ↗        ░░░░ bridge ░░░░                      │
+ *      │      ┌───────door──────║──────────────────┐          │
+ *      │      │                 ║                  │          │
+ *      │machine        ramp ↘ [ pit ]             door  pad   │
+ *      │      door            [ pit ] ↖ ramp        machine   │
+ *      │      │                 ║                  │          │
+ *      │      └─────────────────║──────door────────┘          │
+ *      │                    ░░░░ bridge ░░░░        ↙ ramp    │
+ *      └──────────────────────────────────────────────────────┘
+ *            ◄─────────────────────── south walkway (z = 3)
+ * @module game/maps/foundry
+ */
+
+import { nav } from "./foundry.nav.js";
+
+const boxes = [], ramps = [];
+const box = (x0, y0, z0, x1, y1, z1, mat) => boxes.push({ min: [x0, y0, z0], max: [x1, y1, z1], mat });
+/** the same box turned half a circle about the centre */
+const both = (x0, y0, z0, x1, y1, z1, mat) => { box(x0, y0, z0, x1, y1, z1, mat); box(-x1, -y1, z0, -x0, -y0, z1, mat); };
+const ramp = (x0, y0, z0, x1, y1, z1, dir, mat = "ramp") => ramps.push({ min: [x0, y0, z0], max: [x1, y1, z1], dir, mat });
+const flip = { "+x": "-x", "-x": "+x", "+y": "-y", "-y": "+y" };
+const bothRamps = (x0, y0, z0, x1, y1, z1, dir, mat) => { ramp(x0, y0, z0, x1, y1, z1, dir, mat); ramp(-x1, -y1, z0, -x0, -y0, z1, flip[dir], mat); };
+
+const X = 19.5, Y = 15.5, H = 8, WALL = 2.7, DECK = 3;
+
+// floor, with a hole for the pit (10 × 8 m, 2.5 m deep)
+both(-20, -16, -3, -5, 16, 0, "floor");
+both(-5, -16, -3, 5, -4, 0, "floor");
+box(-5, -4, -3.5, 5, 4, -2.5, "pit");
+
+// shell
+both(-20, -16, 0, -X, 16, H, "wall");
+both(-20, -16, 0, 20, -Y, H, "wall");
+box(-20, -16, H, 20, 16, H + 0.5, "ceiling");
+
+// the pit room: walls you can see over from the walkways, with four doors
+both(-11, -9, 0, -10.5, -2, WALL, "wall");
+both(-11, 2, 0, -10.5, 9, WALL, "wall");
+both(-11, 8.5, 0, -7, 9, WALL, "wall");
+both(-4, 8.5, 0, 11, 9, WALL, "wall");
+
+// ramps down into the pit, along its north and south sides
+bothRamps(-5, 2.5, -2.5, 0, 4, 0, "-x");
+
+// walkways, the ramps up to them, and the bridge across
+both(-7, 12, WALL, X, Y, DECK, "deck");
+bothRamps(-13, 12, 0, -7, Y, DECK, "+x");
+box(-1.5, -12, WALL, 1.5, 12, DECK, "deck");
+for (const x of [-1, 5, 11, 17]) both(x - 0.25, 12, 0, x + 0.25, 12.5, WALL, "metal");
+
+// a booth at the far end of each walkway: somewhere to come back to life out of everyone's sight
+// (two staggered screens and a parapet: you walk an S to get out, and no line of sight makes it in)
+both(16.4, 14.3, DECK, 16.9, Y, DECK + 2.3, "wall");
+both(14.6, 12, DECK, 15.1, 13.6, DECK + 2.3, "wall");
+both(15.1, 12, DECK, X, 12.4, DECK + 2.3, "wall");
+
+// machines and cover in the corridor, so no straight is a shooting gallery
+both(-19.5, -1.5, 0, -16.5, 1.5, 3.4, "metal");
+// the pier that carries the bridge over the pit: it also hides the two ends of the pit from each other
+box(-1.2, -1.2, -2.5, 1.2, 1.2, WALL, "metal");
+both(1, 9, 0, 3, 12, WALL, "metal");
+both(-16.5, 6.5, 0, -15.5, 7.5, 1, "crate");
+both(-16.5, 7.5, 0, -15.5, 8.5, 1, "crate");
+both(-16.5, 7, 1, -15.5, 8, 2, "crate");
+both(-9.5, 10, 0, -8.5, 11, 1, "crate");
+both(12.5, 9.5, 0, 14, 11, 1, "crate");
+both(6.5, 5, 0, 7.5, 6, 1, "crate");
+both(-8.5, 5.5, 0, -7.5, 6.5, 1, "crate");
+both(2.5, 0.5, -2.5, 3.5, 1.5, -1.5, "crate");
+
+// the furnace: glowing vents low in the pit walls and a strip of embers along the pier
+both(-5.06, -3, -2.2, -5, -1, -1.9, "ember");
+both(-4, 3.94, -0.5, -1, 4, -0.3, "ember");
+box(-1.26, -0.6, -2.3, -1.2, 0.6, -2.1, "ember"); box(1.2, -0.6, -2.3, 1.26, 0.6, -2.1, "ember");
+// strip lights along the edges of the bridge
+both(-1.5, -12, DECK, -1.44, 12, DECK + 0.05, "neon");
+
+/** warm lamps hung under the roof and the walkways, and the furnace's own light */
+const lights = [];
+const lamp = (x, y, z, color, radius) => { lights.push({ pos: [x, y, z], color, radius }); lights.push({ pos: [-x, -y, z], color, radius }); };
+const WARM = [1.5, 1.05, 0.62], COOL = [0.75, 0.95, 1.25];
+lamp(-15, 9, 5.2, WARM, 17);
+lamp(-15, -8, 5.2, WARM, 17);
+lamp(-3, 12.5, 2.4, WARM, 11);
+lamp(10, 13.7, 5.6, COOL, 13);
+lamp(-6.5, 4.5, 4.6, WARM, 13);
+lights.push({ pos: [0, 0, -1.2], color: [2.0, 0.7, 0.2], radius: 9 });
+
+export const foundry = {
+    id: "foundry",
+    name: "Foundry",
+    env: { indoor: true },
+    boxes, ramps,
+    /** x, y, z of the feet, and the yaw to face */
+    spawns: [
+        [-18.5, 14.5, 0, -0.7], [18.5, -14.5, 0, 2.44],
+        [-18.5, -14.5, 0, 0.7], [18.5, 14.5, 0, -2.44],
+        [18.4, 14.2, DECK, -2.5], [-18.4, -14.2, DECK, 0.64],
+        [-3.5, -2.5, -2.5, 0.6], [3.5, 2.5, -2.5, -2.54],
+    ],
+    /** stand on the pad and it throws you: here, from the pit room floor up onto the bridge */
+    jumpPads: [{ pos: [8, 0, 0], radius: 0.9, velocity: [-8.2, 0, 12.6] }],
+    /** a weapon for each range, two of most things so neither end goes short, and one prize in the open */
+    pickups: [
+        { type: "overcharge", pos: [0, 0, DECK] },
+        { type: "launcher", pos: [0, -2, -2.5] },
+        { type: "rifle", pos: [10, 13.7, DECK] }, { type: "rifle", pos: [-10, -13.7, DECK] },
+        { type: "shotgun", pos: [9.3, -7, 0] }, { type: "shotgun", pos: [-9.3, 7, 0] },
+        { type: "smg", pos: [15.3, 0, 0] }, { type: "smg", pos: [-15.3, 0, 0] },
+        // one more of each by the corners, so nobody is far from a gun when they come back
+        { type: "rifle", pos: [-16, 11, 0] }, { type: "rifle", pos: [16, -11, 0] },
+        { type: "shotgun", pos: [-16, -11.5, 0] }, { type: "shotgun", pos: [16, 11.5, 0] },
+        { type: "health", pos: [0, -6.5, 0] }, { type: "health", pos: [0, 6.5, 0] },
+        { type: "health", pos: [-12.5, -13.7, 0] }, { type: "health", pos: [12.5, 13.7, 0] },
+        { type: "armour", pos: [-3.5, -13.7, DECK] }, { type: "armour", pos: [3.5, 13.7, DECK] },
+        { type: "ammo", pos: [5.5, -10.7, 0] }, { type: "ammo", pos: [-5.5, 10.7, 0] },
+    ],
+    lights,
+    waypoints: nav.points, links: nav.links,
+};
