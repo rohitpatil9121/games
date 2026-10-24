@@ -4,7 +4,7 @@
 
 ### A synthwave runner in the browser, built on a from-scratch WebGL engine
 
-**[▶ Play now](https://rohitpatil9121.github.io/neon-rush/)**
+**[▶ Play now](https://rohitpatil9121.github.io/games/neon-rush/)**
 
 `JavaScript` · `WebGL` · `GLSL` · `GSAP` · `Web Audio` · `No build step`
 

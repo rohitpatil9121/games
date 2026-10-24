@@ -4,7 +4,7 @@
 
 ### A gravity puzzle. Place worlds, bend the path, reach the light.
 
-**[▶ Play now](https://rohitpatil9121.github.io/orbital/)**
+**[▶ Play now](https://rohitpatil9121.github.io/games/orbital/)**
 
 `JavaScript` · `WebGL2` · `GLSL` · `Projection Lab engine` · `No build step`
 

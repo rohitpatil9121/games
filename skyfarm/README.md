@@ -4,6 +4,8 @@
 
 ### Grow a garden on an island in the sky. Glide to the next one.
 
+**[▶ Play now](https://rohitpatil9121.github.io/games/skyfarm/)**
+
 `JavaScript` · `WebGL` · `GLSL` · `Projection Lab engine` · `No build step` · `No three.js`
 
 </div>

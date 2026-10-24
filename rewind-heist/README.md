@@ -7,7 +7,7 @@
 You never have enough time. Every loop you play is replayed by a **ghost** of your past self.<br>
 Put your selves to work, crack the vault, and get the **gold** out.
 
-**[▶ Play it now](https://rohitpatil9121.github.io/rewind-heist/)**
+**[▶ Play it now](https://rohitpatil9121.github.io/games/rewind-heist/)**
 
 `JavaScript` · `WebGL` · `Custom 3D engine` · `Web Audio` · `No build step`
 

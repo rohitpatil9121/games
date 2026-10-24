@@ -4,25 +4,175 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Games on Projection Lab</title>
+<meta name="description" content="Nine browser games by Rohit Patil, all on Projection Lab, a WebGL engine written from scratch. Play them right here.">
 <style>
-  :root { --ink: #f4efe4; --dim: rgba(244, 239, 228, 0.7); --sand: #e8d6a8; }
-  body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #123544, #0b1820); color: var(--ink); font: 16px/1.5 system-ui, sans-serif; display: grid; place-items: center; }
-  main { max-width: 720px; padding: 32px 16px; }
-  h1 { font-size: clamp(32px, 6vw, 52px); margin: 0 0 8px; letter-spacing: 0.04em; }
-  p { color: var(--dim); }
-  a.card { display: block; margin-top: 24px; padding: 20px 22px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.15); color: inherit; text-decoration: none; }
-  a.card:hover, a.card:focus-visible { border-color: var(--sand); outline: none; }
-  a.card h2 { margin: 0; letter-spacing: 0.1em; }
+  :root {
+    --bg: #0d1117; --bg2: #121a24; --card: #161f2b; --line: rgba(255, 255, 255, 0.1); --line2: rgba(255, 255, 255, 0.22);
+    --ink: #f2efe8; --dim: rgba(242, 239, 232, 0.68); --faint: rgba(242, 239, 232, 0.45); --accent: #ffb547; --wip: #8fb8ff;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(1200px 600px at 20% -10%, #1d2b3d 0%, transparent 60%), linear-gradient(180deg, var(--bg2), var(--bg)); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: inherit; }
+  header, main, footer { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+  header { padding-top: 56px; padding-bottom: 8px; }
+  h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1.05; margin: 0 0 12px; letter-spacing: 0.02em; }
+  .lede { color: var(--dim); max-width: 640px; margin: 0; }
+  .lede a { color: var(--accent); }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 28px 0 0; padding: 0; list-style: none; }
+  .filters button { font: inherit; font-size: 14px; color: var(--dim); background: transparent; border: 1px solid var(--line2); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+  .filters button[aria-pressed="true"] { color: #1a1206; background: var(--accent); border-color: var(--accent); }
+  .filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; margin: 24px 0 48px; padding: 0; list-style: none; }
+  .card { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; transition: border-color 0.15s, transform 0.15s; }
+  .card:hover, .card:focus-within { border-color: var(--line2); transform: translateY(-2px); }
+  .shot { position: relative; display: block; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }
+  .shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .badge { position: absolute; top: 10px; left: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; padding: 3px 9px; border-radius: 999px; background: rgba(10, 14, 20, 0.82); color: var(--wip); border: 1px solid rgba(143, 184, 255, 0.4); }
+  .body { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px 18px; flex: 1; }
+  .card h2 { margin: 0; font-size: 20px; letter-spacing: 0.12em; }
+  .pitch { margin: 0; color: var(--dim); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+  .tags li { font-size: 12px; color: var(--faint); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; }
+  details { color: var(--faint); font-size: 14px; }
+  summary { cursor: pointer; color: var(--dim); }
+  details p { margin: 6px 0 0; }
+  kbd { font: 12px ui-monospace, Consolas, monospace; border: 1px solid var(--line2); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--ink); }
+  .note { font-size: 13px; color: var(--faint); margin: 0; }
+  .actions { display: flex; gap: 10px; margin-top: auto; padding-top: 4px; }
+  .play { flex: 1; text-align: center; font-weight: 700; text-decoration: none; color: #1a1206; background: var(--accent); border-radius: 8px; padding: 10px 14px; }
+  .play:hover { filter: brightness(1.08); }
+  .play:focus-visible, .src:focus-visible, .shot:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .src { text-decoration: none; color: var(--dim); border: 1px solid var(--line2); border-radius: 8px; padding: 10px 14px; }
+  .src:hover { color: var(--ink); }
+  footer { padding-bottom: 40px; color: var(--faint); font-size: 14px; }
+  footer p { margin: 4px 0; }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { .card { transition: none; } .card:hover, .card:focus-within { transform: none; } }
 </style>
 </head>
 <body>
-<main>
+<header>
   <h1>Games</h1>
-  <p>Browser games on Projection Lab, my own WebGL engine.</p>
-  <a class="card" href="tidefall/">
-    <h2>TIDEFALL</h2>
-    <p>The sea goes out. The ruins come up. Get back before it returns. Raid with up to 8 players, or practise against bots right here in the browser.</p>
-  </a>
+  <p class="lede">Browser games I made on <a href="https://rohitpatil9121.github.io/projection_library/">Projection Lab</a>, a WebGL engine I wrote from scratch. There's no three.js and no bundler, just plain ES modules. Every game below plays right here in the browser.</p>
+  <ul class="filters" aria-label="Show">
+    <li><button type="button" data-filter="all" aria-pressed="true">All</button></li>
+    <li><button type="button" data-filter="solo" aria-pressed="false">Single player</button></li>
+    <li><button type="button" data-filter="multi" aria-pressed="false">Multiplayer</button></li>
+  </ul>
+</header>
+
+<main>
+  <ul class="grid" id="grid">
+    <li class="card" data-kind="multi">
+      <a class="shot" href="skyfarm/" tabindex="-1" aria-hidden="true"><img src="shots/skyfarm.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>SKYFARM</h2>
+        <p class="pitch">Grow a garden on an island in the sky, then glide to the next one. Storms, nights and an airship to build.</p>
+        <ul class="tags"><li>Farming</li><li>Solo</li><li>Co-op up to 4</li></ul>
+        <details><summary>Controls</summary><p><kbd>W A S D</kbd> walk or steer the glider, mouse looks, <kbd>Space</kbd> jumps and opens the glider, <kbd>E</kbd> or click uses, <kbd>Q</kbd> picks the next seed. Gamepad and touch work too.</p></details>
+        <p class="note">Co-op needs the game's Node server (<code>npm start</code>). Solo plays here.</p>
+        <div class="actions"><a class="play" href="skyfarm/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/skyfarm">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="multi">
+      <a class="shot" href="tidefall/" tabindex="-1" aria-hidden="true"><img src="shots/tidefall.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>TIDEFALL</h2>
+        <p class="pitch">The sea goes out, the ruins come up. Raid them and get back to camp before the tide returns.</p>
+        <ul class="tags"><li>Team raid</li><li>2 to 4 teams</li><li>Bots</li></ul>
+        <details><summary>Controls</summary><p><kbd>W A S D</kbd> move, mouse looks, <kbd>Space</kbd> jumps, swims up or climbs. Every key can be changed in Settings.</p></details>
+        <p class="note">Practice against bots plays here. Online rooms need the game's Node server.</p>
+        <div class="actions"><a class="play" href="tidefall/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/tidefall">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="multi">
+      <a class="shot" href="breach/" tabindex="-1" aria-hidden="true"><img src="shots/breach.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>BREACH</h2>
+        <p class="pitch">A fast arena shooter: two to eight players, five weapons, five-minute rounds.</p>
+        <ul class="tags"><li>Shooter</li><li>Deathmatch</li><li>Bots</li></ul>
+        <details><summary>Controls</summary><p><kbd>W A S D</kbd> move, mouse aims, left click fires, <kbd>1</kbd> to <kbd>5</kbd> pick a weapon. Every key can be changed in Settings.</p></details>
+        <p class="note">Practice against bots plays here. Online rooms need the game's Node server.</p>
+        <div class="actions"><a class="play" href="breach/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/breach">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="solo">
+      <a class="shot" href="night-market/" tabindex="-1" aria-hidden="true"><img src="shots/night-market.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>NIGHT MARKET</h2>
+        <p class="pitch">A street-food tycoon where the staff and the regulars are the game. Ten nights, and rent is due every one.</p>
+        <ul class="tags"><li>Tycoon</li><li>Solo</li></ul>
+        <details><summary>Controls</summary><p>Click a person or a stall to see what they're doing, click an empty spot to buy a stall. Drag or <kbd>A</kbd> <kbd>D</kbd> to move along the street, wheel to zoom.</p></details>
+        <div class="actions"><a class="play" href="night-market/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/night-market">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="solo">
+      <a class="shot" href="orbital/" tabindex="-1" aria-hidden="true"><img src="shots/orbital.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>ORBITAL</h2>
+        <p class="pitch">A gravity puzzle. Place worlds, bend the comet's path, reach the light.</p>
+        <ul class="tags"><li>Puzzle</li><li>Solo</li><li>Sandbox</li></ul>
+        <details><summary>Controls</summary><p>Drag a planet from the dock onto the grid, drag it again to move it. <kbd>Space</kbd> launches the comet, hold <kbd>F</kbd> to fast-forward.</p></details>
+        <div class="actions"><a class="play" href="orbital/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/orbital">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="solo">
+      <a class="shot" href="rewind-heist/" tabindex="-1" aria-hidden="true"><img src="shots/rewind-heist.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>REWIND HEIST</h2>
+        <p class="pitch">A time-loop stealth heist. Every loop is replayed by a ghost of your past self, so put your selves to work and get the gold out.</p>
+        <ul class="tags"><li>Stealth</li><li>Puzzle</li><li>Solo</li></ul>
+        <details><summary>Controls</summary><p><kbd>W A S D</kbd> or click to move, <kbd>F</kbd> uses or hides, <kbd>G</kbd> grabs, <kbd>T</kbd> throws, hold <kbd>Shift</kbd> for slow motion. <kbd>E</kbd> ends the loop, <kbd>R</kbd> retries it, <kbd>Tab</kbd> plans the timeline.</p></details>
+        <div class="actions"><a class="play" href="rewind-heist/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/rewind-heist">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="solo">
+      <a class="shot" href="neon-rush/" tabindex="-1" aria-hidden="true"><img src="shots/neon-rush.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>NEON RUSH</h2>
+        <p class="pitch">A synthwave runner. Dodge, double-jump and chase near misses down an endless neon track.</p>
+        <ul class="tags"><li>Runner</li><li>Arcade</li><li>Solo</li></ul>
+        <details><summary>Controls</summary><p><kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd> change lanes, <kbd>Space</kbd>, <kbd>W</kbd> or <kbd>↑</kbd> jumps, <kbd>P</kbd> pauses, <kbd>M</kbd> mutes.</p></details>
+        <div class="actions"><a class="play" href="neon-rush/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/neon-rush">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="multi">
+      <a class="shot" href="decoy/" tabindex="-1" aria-hidden="true"><span class="badge">Work in progress</span><img src="shots/decoy.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>DECOY</h2>
+        <p class="pitch">Hide as a prop, or hunt the props that breathe. Four rounds, and the sides swap every round.</p>
+        <ul class="tags"><li>Prop hunt</li><li>4 to 10 players</li><li>Bots</li></ul>
+        <details><summary>Controls</summary><p><kbd>W A S D</kbd> move, mouse looks, left click acts. Every key can be changed in Settings.</p></details>
+        <p class="note">Still being built (stage 5 of 9). Practice against bots plays here.</p>
+        <div class="actions"><a class="play" href="decoy/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/decoy">Code</a></div>
+      </div>
+    </li>
+    <li class="card" data-kind="multi">
+      <a class="shot" href="paper-planes/" tabindex="-1" aria-hidden="true"><span class="badge">Work in progress</span><img src="shots/paper-planes.jpg" alt="" loading="lazy" width="1280" height="720"></a>
+      <div class="body">
+        <h2>PAPER PLANES</h2>
+        <p class="pitch">You're a paper plane in a giant room, and the air is the terrain. Ride thermals, dodge gusts, play tag.</p>
+        <ul class="tags"><li>Flying</li><li>Tag</li><li>Bots</li></ul>
+        <details><summary>Controls</summary><p>Mouse steers, <kbd>Space</kbd> or click flaps, <kbd>W A S D</kbd> also steer, <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> change the fold, <kbd>R</kbd> restarts.</p></details>
+        <p class="note">Still being built (stage 5 of 9). Practice plays here.</p>
+        <div class="actions"><a class="play" href="paper-planes/">Play</a><a class="src" href="https://github.com/rohitpatil9121/games/tree/main/paper-planes">Code</a></div>
+      </div>
+    </li>
+  </ul>
 </main>
+
+<footer>
+  <p>Made by Rohit Patil. Each game's folder has its own README and its licences.</p>
+  <p>The online modes need each game's Node server, which this static site can't run. Practice and solo play work everywhere.</p>
+</footer>
+
+<script>
+  const buttons = document.querySelectorAll(".filters button");
+  for (const b of buttons) b.addEventListener("click", () => {
+    for (const o of buttons) o.setAttribute("aria-pressed", String(o === b));
+    for (const card of document.querySelectorAll(".card")) card.hidden = b.dataset.filter !== "all" && card.dataset.kind !== b.dataset.filter;
+  });
+</script>
 </body>
 </html>

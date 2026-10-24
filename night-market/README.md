@@ -4,7 +4,7 @@
 
 ### A street-food tycoon where the staff and the regulars are the game
 
-**[▶ Play now](https://rohitpatil9121.github.io/night-market/)**
+**[▶ Play now](https://rohitpatil9121.github.io/games/night-market/)**
 
 `JavaScript` · `WebGL2` · `GLSL` · `Projection Lab engine` · `No build step`
 
