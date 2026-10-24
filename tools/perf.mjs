@@ -23,6 +23,8 @@ const VIEWS = {
     "hut door": [[-1.2, -2.4, 61.75], [8, 0.5, 60.6], 0.35, 60],
     "grass close": [[8.5, -14.5, 61.3], [14, -11, 60.2], 0.35, 55],
     "home wide": [[70, -78, 82], [0, 0, 52], 0.735, 45],
+    // the heaviest weather: every rain streak, splashes, wet surfaces and puddles
+    "grass close, storm": [[8.5, -14.5, 61.3], [14, -11, 60.2], "storm", 55],
 };
 const port = 9900 + Math.floor(Math.random() * 90);
 const server = spawn(process.execPath, [fileURLToPath(new URL("./serve.mjs", import.meta.url)), String(port)], { stdio: "ignore" });
@@ -31,7 +33,8 @@ const browser = await launch({ gpu: true });
 
 const measure = (v) => `(() => {
     const S = skyfarm, g = S.game, gl = g.renderer.gl;
-    S.shot(${JSON.stringify(v[0])}, ${JSON.stringify(v[1])}, ${v[2]}, ${v[3]});
+    S.weather(${JSON.stringify(typeof v[2] === "string" ? v[2] : "dry")});
+    S.shot(${JSON.stringify(v[0])}, ${JSON.stringify(v[1])}, ${typeof v[2] === "string" ? "undefined" : v[2]}, ${v[3]});
     S.view.snapExposure = true;
     S.run(0.3);
     const px = new Uint8Array(4), samples = [];

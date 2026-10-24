@@ -18,6 +18,7 @@ import { onBridge, merchantAt, sell, buy, nextMerchantDay } from "../game/progre
 import { TALKS, STRINGS, talkTo } from "../game/dialogue.js";
 import { finishTalk } from "../game/sim.js";
 import { CROPS, DAY_TICKS, WEATHER } from "../game/data.js";
+import { STORM, stormAt, gustAt } from "../game/weather.js";
 
 let failed = 0;
 const check = (ok, what) => { console.log((ok ? "  ok   " : "  FAIL ") + what); if (!ok) failed++; };
@@ -250,6 +251,55 @@ const world = makeWorld(WORLD);
     check(s.ended > 0 && s.progress.restored.size === world.islands.length && s.pouch.materials.oldseed_high === 0, `the three seeds at the Crown wake the tree: the ending, and every island green (${before} → ${s.progress.restored.size} restored)`);
     const t = talkTo("crown", createState(world));
     check(t.lines[0] === STRINGS.crown_need, "without the seeds the Crown only says what it's waiting for");
+}
+
+// ---------------------------------------------------------------- storms (stage 7)
+{
+    const seed = world.data.seed;
+    let day = WEATHER.stormFrom; while (weatherOf(seed, day).kind !== "storm") day++;
+    const w = weatherOf(seed, day), T = (f) => (day - 1) * DAY_TICKS + Math.round(f * DAY_TICKS);
+    // telegraphed: it builds over 2 in-game hours or more before the rain, full in the rain, nothing on calm days
+    const hours = STORM.BUILD * 18;
+    let calm = 0; for (let d = 1; d < day; d++) if (weatherOf(seed, d).kind !== "storm") for (let k = 0; k < 20; k++) calm = Math.max(calm, stormAt(seed, (d - 1) * DAY_TICKS + k * DAY_TICKS / 20));
+    check(calm === 0 && stormAt(seed, T(w.rainFrom - STORM.BUILD * 0.9)) > 0 && stormAt(seed, T(w.rainFrom - STORM.BUILD * 1.05)) === 0 && stormAt(seed, T((w.rainFrom + w.rainTo) / 2)) === 1,
+        `the day-${day} storm builds for ${hours.toFixed(1)} in-game hours before its rain, blows in it, and calm days have none`);
+    // gusts: the same for a seed and a tick; a warning swell before every push
+    const g = { x: 0, y: 0, z: 0, warn: 0, push: 0 }, mid = T((w.rainFrom + w.rainTo) / 2);
+    let warnedFirst = true, pushes = 0, same = true;
+    for (let k = 0; k < 60 * 90; k++) {
+        gustAt(seed, mid + k, g); const push = g.push, warn = g.warn;
+        if (push > 0 && gustAt(seed, mid + k - 1, { ...g }).push === 0) { pushes++; if (gustAt(seed, mid + k - 30, { ...g }).warn === 0) warnedFirst = false; }
+        const h = gustAt(seed, mid + k, { ...g }); if (h.push !== push || h.warn !== warn) same = false;
+    }
+    check(same && pushes >= 8 && warnedFirst, `${pushes} gusts in 90 s of storm, each with a swell half a second before it, the same every time`);
+    // a glide through the storm comes down faster than the same glide on a calm day
+    const glide = (tick) => {
+        const s = createState(world), p = s.player; s.tick = tick;
+        p.x = 700; p.y = -700; p.z = 300; p.vx = p.vy = p.vz = 0; p.fx = 1; p.fy = 0; p.hasGlider = true; p.stamina = 60;
+        p.mode = "glide"; p.ground = false; p.yaw = 0; p.speed = 14; p.pitch = -0.1; p.roll = 0; p.drift = false; p.stalled = false;
+        for (let k = 0; k < 60 * 18; k++) step(s, NO_INPUT);
+        return { z: p.z, off: Math.abs(p.y + 700) };
+    };
+    const a = glide(mid), b = glide(mid - DAY_TICKS);
+    check(weatherOf(seed, day - 1).kind !== "storm" && a.z < b.z - 3, `18 s gliding in the storm ends ${(b.z - a.z).toFixed(1)} m lower and ${a.off.toFixed(1)} m off its line (calm: ${b.off.toFixed(1)} m)`);
+    // storm-bloom takes only in a storm; storm-amber is there only while it blows
+    const sow = (tick) => {
+        const s = createState(world), p = s.player, G = world.data.gardens.find((q) => q.island === "frost"); s.tick = tick;
+        const ix = G.x0 + 1, iy = G.y0 + 1;
+        p.x = ix - 0.6; p.y = iy + 0.5; p.z = topAt(islandUnder(world, p.x, p.y), p.x, p.y); p.fx = 1; p.fy = 0; p.ground = true; p.mode = "foot";
+        s.pouch.seeds.stormbloom = 2; s.pouch.selected = "stormbloom";
+        let refused = false;
+        for (let k = 0; k < 60; k++) { step(s, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact }); refused ||= s.events.some((e) => e.type === "needs-storm"); }
+        return { planted: [...s.plots.values()].some((q) => q.crop === "stormbloom"), refused };
+    };
+    const inStorm = sow(mid), outside = sow(mid - DAY_TICKS);
+    const amber = (tick) => {
+        const s = createState(world), p = s.player, it = s.items.find((i) => i.material === "stormamber"); s.tick = tick;
+        p.x = it.x - 0.8; p.y = it.y; p.z = topAt(islandUnder(world, p.x, p.y), p.x, p.y); p.fx = 1; p.fy = 0; p.ground = true; p.mode = "foot";
+        for (let k = 0; k < 40; k++) step(s, k % 2 ? NO_INPUT : { ...NO_INPUT, buttons: BTN.interact });
+        return s.pouch.materials.stormamber;
+    };
+    check(inStorm.planted && !outside.planted && outside.refused && amber(mid) === 1 && amber(mid - DAY_TICKS) === 0, "storm-bloom takes only when sown in a storm (and says so otherwise); storm-amber can be picked only while one blows");
 }
 
 console.log(failed ? `${failed} failed` : "all passed");

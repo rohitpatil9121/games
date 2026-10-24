@@ -3,6 +3,8 @@ import { grow, farmDawn, weatherOf, harvestOf, afterHarvest, growsIn, cook, cook
 import { makeProgress, activeAir, restore, deckBelow, overRail, bridgeEndNear, missingFor, startBridge, stepBridges, heartNear, merchantAt, upgradeAvailable, applyUpgrade } from "./progression.js";
 import { BOOST } from "./data.js";
 import { talkTo, applyEffects } from "./dialogue.js";
+import { stormAt, gustAt } from "./weather.js";
+const gust = { x: 0, y: 0, z: 0, warn: 0, push: 0 };
 import { dsin, dcos, datan2, clamp, PI, TAU, yawOf } from "./det.js";
 import { sample, makeAir } from "./air.js";
 import { topAt, groundBelow, solidAt, boxAt, islandUnder, gardenAt } from "./islands.js";
@@ -329,6 +331,11 @@ function stepGlide(state, p, input, pressed) {
     // ---- the air
     sample(state.air, state.tick * DT, p.x, p.y, p.z, air);
     p.inLift = air.lift; p.inCurrent = air.current;
+    // a storm's gusts push the glider about (weather.js); the HUD and the sound read p.gust
+    gustAt(state.seed, state.tick, gust);
+    air.x += gust.x; air.y += gust.y; air.z += gust.z;
+    p.gust = gust.push; p.gustWarn = gust.warn;
+    if (gust.push > 0.5 && !p.gusted) { p.gusted = true; state.events.push({ type: "gust" }); } else if (gust.push < 0.1) p.gusted = false;
     const cy = dcos(p.yaw), sy = dsin(p.yaw);
     const ax = air.x + air.tx, ay = air.y + air.ty;
     const wz = air.z > 0 ? air.z * GLIDE.thermal : air.z * GLIDE.wind;
@@ -449,8 +456,9 @@ function aim(state, p) {
 
 function nearItem(state, p) {
     let best = null, bd = FARM.pickRadius;
+    const storming = stormAt(state.seed, state.tick) > 0.5;
     for (const it of state.items) {
-        if (it.taken) continue;
+        if (it.taken || (it.storm && !storming)) continue;
         const dz = it.z - (p.z + 0.6);
         if (dz > 1.8 || dz < -1.8) continue;
         const d = Math.hypot(it.x - p.x, it.y - p.y);
@@ -498,6 +506,8 @@ function act(state, p) {
     } else if (does === "plant") {
         // high crops need the cold up high; some won't grow down low (GDD §2)
         if (!growsIn(pouch.selected, plot.band)) { state.events.push({ type: "wrong-band", crop: pouch.selected, band: plot.band, ix, iy }); return; }
+        // storm-bloom takes only when it's sown in a storm (GDD §4)
+        if (pouch.selected === "stormbloom" && stormAt(state.seed, state.tick) < 0.5) { state.events.push({ type: "needs-storm", ix, iy }); return; }
         plot.crop = pouch.selected; plot.growth = 0; plot.watered = false; plot.days = 0; plot.grew = false; plot.pollinated = false; plot.rained = false;
         pouch.seeds[pouch.selected]--;
         if (!pouch.seeds[pouch.selected]) { const next = CROP_IDS.find((c) => pouch.seeds[c] > 0); pouch.selected = next || ""; }

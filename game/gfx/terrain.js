@@ -106,6 +106,7 @@ ${header()}
 uniform float u_top;        // the island's top height (strata are measured down from it)
 uniform vec3 u_rockTint;    // the band's rock colour (warmer in the Orchard, cooler in the High Rocks)
 uniform float u_dry;        // 1 = parched (not yet restored), 0 = green again
+uniform float u_time;       // the puddles' ripples
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec4 v_color;
@@ -140,6 +141,19 @@ void main() {
         vec3 straw = mix(vec3(0.62, 0.54, 0.34), vec3(0.55, 0.45, 0.3), fine);
         albedo = mix(albedo, straw * (0.9 + 0.2 * clump), u_dry * (0.75 + 0.25 * smoothstep(0.3, 0.7, fbm(w.xy * 0.12))));
         wrap = 0.45;
+        // puddles: in the low, flat, worn places a slow noise picks, filling as the rain goes on; rings ripple in them
+        float pool = smoothstep(0.86, 0.9, 1.0 - fbm(w.xy * 0.16) + (1.0 - v_color.g) * 0.2) * smoothstep(0.96, 0.995, n.z) * smoothstep(0.25, 0.85, u_wet);
+        if (pool > 0.01) {
+            vec2 cell = floor(w.xy * 1.3), f = fract(w.xy * 1.3) - 0.5;
+            float ph = fract(u_time * 0.9 + hash12(cell)), ring = sin((length(f) - ph * 0.5) * 40.0) * (1.0 - ph) * step(length(f), ph * 0.5 + 0.05);
+            n = normalize(n + vec3(f * ring * 0.6, 0.0));
+            vec3 view = normalize(u_camPos - w);
+            vec3 r = reflect(-view, n);
+            r.z = abs(r.z);
+            vec3 sky = atmoSky(w.z, r);
+            gl_FragColor = vec4(atmoAerial(mix(paint(albedo * 0.5, w, n, wrap, 0.0), sky * 0.6, pool * 0.7), w), 1.0);
+            return;
+        }
     } else {
         float below = u_top - w.z, moss;
         albedo = rockColor(w, below, moss) * u_rockTint;

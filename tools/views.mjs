@@ -36,7 +36,8 @@ export const VIEWS = [
     { name: "6-high-rocks-below", eye: [1450, -270, 420], target: [1560, -110, 515], fov: 55 },
 ];
 const tour = args.includes("--tour");
-const TIMES = tour ? [["afternoon", 0.55]] : [["noon", 0.35], ["golden", 0.735]];
+// rain: the middle of the first rainy day's rain, as wet as it gets (GDD §0: each view at noon, golden hour, in rain)
+const TIMES = tour ? [["afternoon", 0.55]] : [["noon", 0.35], ["golden", 0.735], ["rain", "rain"]];
 if (tour) {
     const { ISLANDS } = await import("../game/world-data.js");
     VIEWS.length = 0;
@@ -53,7 +54,8 @@ const browser = await launch({ gpu: true });
 
 const capture = (v, t) => `(async () => {
     const S = skyfarm, g = S.game;
-    S.shot(${JSON.stringify(v.eye)}, ${JSON.stringify(v.target)}, ${t}, ${v.fov});
+    if (${JSON.stringify(t)} === "rain") { S.weather("rain"); S.shot(${JSON.stringify(v.eye)}, ${JSON.stringify(v.target)}, undefined, ${v.fov}); }
+    else { S.weather("dry"); S.state.tick = ${JSON.stringify(t)} * 72000; S.shot(${JSON.stringify(v.eye)}, ${JSON.stringify(v.target)}, ${JSON.stringify(t)}, ${v.fov}); }
     S.state.player.x = 6; S.state.player.y = 9.5; S.state.player.z = 60; // out of the way, by the shed
     S.post.enabled = ${!nopost}; S.view.snapExposure = true;
     const tick = S.state.tick;

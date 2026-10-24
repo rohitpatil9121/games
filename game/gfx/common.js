@@ -26,6 +26,11 @@ export const shared = {
     u_shadowTint: new Float32Array([0.92, 0.94, 1.02]),
     /** quality: 0 low, 1 medium, 2 high */
     u_quality: 1,
+    /** weather (the `threejs-precipitation-surfaces` skill's shared weather envelope): how wet every surface is
+     *  (rises while it rains, dries after), how stormy the sky is, a lightning flash */
+    u_wet: 0,
+    u_storm: 0,
+    u_flash: 0,
 };
 
 const users = new Set();
@@ -92,6 +97,8 @@ vec3 windBend(vec3 root, float h, float stiff, float t) {
 
 export const paintChunk = /* glsl */ `
 uniform vec3 u_shadowTint;
+uniform float u_wet;
+uniform float u_flash;
 /**
  * Painterly light. n: shading normal; wrap: 0 = Lambert, 0.5 = very soft; sss: light through thin things
  * from behind (grass, leaves, cloth). Returns the lit colour before haze.
@@ -107,7 +114,15 @@ vec3 paint(vec3 albedo, vec3 world, vec3 n, float wrap, float sss) {
     vec3 ambient = mix(u_groundColor, u_skyColor, up);
     // shadowed sides lean cool, lit sides keep the sun's warmth
     vec3 tint = mix(u_shadowTint, vec3(1.0), sun * sh);
-    return albedo * (direct + ambient) * tint;
+    // wet: everything darkens a little, and what faces the sky gets a sheen of the sky and the sun
+    vec3 a = albedo * (1.0 - 0.28 * u_wet);
+    vec3 color = a * (direct + ambient + vec3(0.75, 0.8, 1.0) * u_flash * 2.0) * tint;
+    if (u_wet > 0.0) {
+        vec3 r = reflect(-view, n);
+        float up = smoothstep(0.3, 0.9, n.z);
+        color += (u_skyColor * 0.12 + u_sunColor * pow(max(dot(r, u_sunDirection), 0.0), 60.0) * 0.8 * sh) * u_wet * up;
+    }
+    return color;
 }
 `;
 

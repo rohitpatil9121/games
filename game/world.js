@@ -16,6 +16,9 @@ import { Character } from "./gfx/characters.js";
 import { Creatures } from "./gfx/creatures.js";
 import { merchantAt } from "./progression.js";
 import { rainingAt } from "./farm.js";
+import { stormAt } from "./weather.js";
+import { islandUnder } from "./islands.js";
+import { rainGeometry, rainMaterial } from "./gfx/rain.js";
 import { makeRandom } from "./det.js";
 
 /**
@@ -108,9 +111,10 @@ export class World {
         this.crops = { soil: inst(primitives.box(0.94, 0.94, 0.16), 400), leaves: inst(primitives.cone(0.5, 1, 6), 3000), balls: inst(primitives.sphere(0.5, 10, 7), 2000), stems: inst(primitives.cylinder(0.5, 0.5, 1, 6), 600) };
         this.seeds = inst(primitives.sphere(0.5, 10, 8), 64);
         this.spriteMesh = inst(primitives.sphere(0.5, 8, 6), 64);
-        // rain: streaks falling round the camera (the full weather pass is stage 7)
-        this.rain = scene.add(new ParticleSystem({ capacity: 2500, gravity: [0, 0, -2], drag: 0, blending: "normal", name: "rain" }));
-        this.rain.castShadow = false; this.rain.frustumCulled = false;
+        // rain: streaks falling round the camera (gfx/rain.js)
+        this.rainMat = rainMaterial();
+        this.rain = add(new Entity({ name: "rain", mesh: new Mesh(rainGeometry(), this.rainMat), castShadow: false, frustumCulled: false }));
+        this.rain.visible = false; this.rainAmount = 0;
         this.gliderItem = add(new Entity({ name: "glider-item", mesh: new Mesh(canopyGeometry(), pm) }));
         this.gliderItem.setScale(0.45);
 
@@ -198,7 +202,8 @@ export class World {
         sx /= m; sy /= m; sz /= m;
         const E = sunLight(eye[2], sz, this._c);
         // under rain clouds the sun is dimmed and the light goes grey-blue (eased, so it doesn't snap)
-        this.overcast = (this.overcast || 0) + ((this.raining ? 1 : 0) - (this.overcast || 0)) * 0.02;
+        // overcast under rain, heavier under a storm (and the storm darkens before its rain, the telegraph)
+        this.overcast = (this.overcast || 0) + (Math.max(this.raining ? 1 : 0, (this.storm || 0) * 1.3) - (this.overcast || 0)) * 0.02;
         for (let i = 0; i < 3; i++) E[i] *= 1 - 0.6 * this.overcast;
         shared.u_atmoSun.set(E);
         // night: the moon lights the scene dimly from the other side
@@ -215,7 +220,9 @@ export class World {
         const up = skyAt(eye[2], [0, 0, 1], scene.sunDirection, [0, 0, 0]), side = skyAt(eye[2], [0.7, 0, 0.3], scene.sunDirection, [0, 0, 0]);
         // (a little less saturated than the sky itself: the light that reaches a shaded wall is a mix of everything)
         const sl = (up[0] + up[1] + up[2] + side[0] + side[1] + side[2]) / 6;
-        for (let i = 0; i < 3; i++) scene.skyColor[i] = (sl * 0.3 + (up[i] * 0.4 + side[i] * 0.6) * 0.7) * 0.9 + night * [0.05, 0.07, 0.13][i];
+        // (a storm's cloud deck takes some of the sky light too, greyer)
+        const st = this.storm || 0;
+        for (let i = 0; i < 3; i++) scene.skyColor[i] = ((sl * 0.3 + (up[i] * 0.4 + side[i] * 0.6) * 0.7) * 0.9 * (1 - 0.35 * st) + sl * 0.15 * st) + night * [0.05, 0.07, 0.13][i];
         // light from below: the cloud sea under everything is a huge bright reflector, so the islands' undersides
         // get a soft blue-white fill instead of going dark (a meadow-facing surface gets a little green with it)
         const g = [0.92, 0.91, 0.9];
@@ -224,7 +231,11 @@ export class World {
         // exposure key: predicted from the light model (no GPU readback), so noon isn't washed out and golden hour
         // isn't murky; eased like an eye adapting, faster toward light than toward dark
         const key = 0.3 * (scene.sunColor[0] + scene.skyColor[0]) + 0.59 * (scene.sunColor[1] + scene.skyColor[1]) + 0.11 * (scene.sunColor[2] + scene.skyColor[2]);
-        this.exposureTarget = Math.min(2.4, Math.max(0.9, 1.75 / Math.pow(Math.max(0.05, key), 0.75)));
+        // (capped lower at night: night should look like night, blue and deep, not a dim day)
+        // (and the eye doesn't fully adapt to a storm: it should feel darker than a grey day)
+        this.exposureTarget = Math.min(2.4 - 1.0 * night, Math.max(0.9, 1.75 / Math.pow(Math.max(0.05, key), 0.75))) * (1 - 0.3 * st - 0.12 * Math.min(1, this.overcast));
+        // under cloud the light is diffuse: shadows go soft and faint
+        if (scene.shadow) scene.shadow.strength = 0.7 * (1 - 0.65 * Math.min(1, this.overcast));
         scene.clearColor.set([side[0], side[1], side[2], 1]);
     }
 
@@ -237,6 +248,11 @@ export class World {
      */
     update(dt, state, pose, eye) {
         this.time += dt;
+        // the weather envelope, shared by every surface (gfx/common.js): wet rises in rain and dries after
+        this.storm = stormAt(state.seed, state.tick);
+        shared.u_storm = Math.max(this.storm, Math.min(1, this.overcast || 0) * 0.65);
+        shared.u_wet = Math.max(0, Math.min(1, shared.u_wet + (this.raining ? dt * 0.12 : -dt * 0.025)));
+        this.lightning(dt, eye);
         this.light(dayT(state), eye);
         const post = this.game.renderer.postfx;
         if (post) {
@@ -301,6 +317,7 @@ export class World {
         this.drawCursor(state);
         this.drawAir(state, eye, dt);
         this.drawAmbient(dt, eye);
+        this.drawFireflies(dt, state, eye);
     }
 
     drawFarm(state) {
@@ -311,8 +328,9 @@ export class World {
     drawItems(state) {
         let n = 0;
         this.gliderItem.visible = false;
+        const storming = (this.storm || 0) > 0.5;
         for (const it of state.items) {
-            if (it.taken) continue;
+            if (it.taken || (it.storm && !storming)) continue;
             const bob = Math.sin(this.time * 2.2 + it.id) * 0.08;
             if (it.kind === "glider") {
                 this.gliderItem.visible = true;
@@ -368,14 +386,56 @@ export class World {
         this.airship.setYaw(yaw);
     }
 
+    /**
+     * Lightning, in a storm's rain: a flash every few seconds somewhere within a kilometre, lighting everything for a
+     * moment (u_flash); its thunder follows at the speed of sound (onThunder, main.js plays it).
+     */
+    lightning(dt, eye) {
+        shared.u_flash = Math.max(0, shared.u_flash - dt * 6);
+        // while it builds: thunder far off now and then, no flash yet (part of the telegraph, GDD §10)
+        if (this.storm > 0.3 && !this.raining) {
+            this.nextRumble = (this.nextRumble ?? 6) - dt;
+            if (this.nextRumble <= 0) { this.nextRumble = 12 + this._r() * 14; if (this.onThunder) this.onThunder(1000 + this._r() * 300); }
+            return;
+        }
+        if (!(this.storm > 0.6 && this.raining)) return;
+        this.nextFlash = (this.nextFlash ?? 3) - dt;
+        if (this.nextFlash > 0) return;
+        this.nextFlash = 4 + this._r() * 10;
+        const d = 150 + this._r() * 900;
+        shared.u_flash = 1 * (1 - d / 1400);
+        if (this.onThunder) this.onThunder(d);
+    }
+
+    /** fireflies over the restored grass at night, round the camera */
+    drawFireflies(dt, state, eye) {
+        if (shared.u_atmoNight < 0.5 || this.raining) return;
+        const isl = islandUnder(this.world, eye[0], eye[1], eye[2]);
+        if (!isl || !state.progress.restored.has(isl.id) || eye[2] - isl.top > 25) return;
+        const n = Math.round(dt * 14);
+        for (let k = 0; k < n; k++) {
+            const a = this._r() * Math.PI * 2, r = 3 + this._r() * 25, x = eye[0] + Math.cos(a) * r, y = eye[1] + Math.sin(a) * r, z = topAt(isl, x, y);
+            if (z === -Infinity) continue;
+            this.motes.emit(1, { position: [x, y, z + 0.4 + this._r() * 1.6], velocity: [(this._r() - 0.5) * 0.6, (this._r() - 0.5) * 0.6, 0.1], speed: 0.2, life: [3, 6], size: [0.09, 0.06], color: [1.4, 1.9, 0.5, 1], colorEnd: [1.2, 1.6, 0.4, 0] });
+        }
+    }
+
     /** rain round the camera while it falls (and the light dims under the cloud, in light()) */
     drawRain(state, eye, dt) {
         this.raining = rainingAt(state.seed, state.tick);
+        // the streaks: half of them in a shower, all in a storm, eased in and out; slanted by the wind
+        const want = this.raining ? 0.55 + 0.45 * (this.storm || 0) : 0;
+        this.rainAmount += (want - this.rainAmount) * Math.min(1, dt * 0.8);
+        const v = this.rainMat.values, W = shared.u_wind, push = 1.5 + (this.storm || 0) * 4;
+        v.u_rain = this.rainAmount; v.u_time = this.time % 10000;
+        v.u_drift[0] = W[0] * push; v.u_drift[1] = W[1] * push; v.u_drift[2] = this.storm || 0;
+        this.rain.visible = this.rainAmount > 0.01;
         if (!this.raining) return;
-        const n = Math.round(dt * 900);
-        for (let k = 0; k < n; k++) {
-            const a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * 30;
-            this.rain.emit(1, { position: [eye[0] + Math.cos(a) * r + shared.u_wind[0] * 3, eye[1] + Math.sin(a) * r + shared.u_wind[1] * 3, eye[2] + 8 + this._r() * 6], velocity: [-shared.u_wind[0] * 1.5, -shared.u_wind[1] * 1.5, -14], life: [0.8, 1.2], size: [0.05, 0.04], color: [0.75, 0.82, 0.92, 0.55], colorEnd: [0.75, 0.82, 0.92, 0.3] });
+        // splashes where it lands, on the island under the camera
+        const isl = islandUnder(this.world, eye[0], eye[1], eye[2]);
+        if (isl) for (let k = 0; k < Math.round(dt * 160); k++) {
+            const a = this._r() * Math.PI * 2, r = Math.sqrt(this._r()) * 14, x = eye[0] + Math.cos(a) * r, y = eye[1] + Math.sin(a) * r, z = topAt(isl, x, y);
+            if (z > -Infinity) this.splash.emit(2, { position: [x, y, z + 0.05], speed: 0.9, velocity: [0, 0, 1.4], life: [0.2, 0.35], size: [0.05, 0.01], color: [0.8, 0.86, 0.95, 0.6] });
         }
     }
 

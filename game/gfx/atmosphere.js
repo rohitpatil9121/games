@@ -100,6 +100,7 @@ uniform vec4 u_atmoHeights;    // rayleigh H, mie H, z0, fill (atmosphere metres
 uniform float u_atmoScale;     // atmosphere metres per world metre
 uniform vec3 u_atmoSun;        // the sun's light at the camera, already reddened (sunLight on the CPU)
 uniform float u_atmoNight;     // 0 by day, 1 at night: the sky's own glow when the sun is gone
+uniform float u_storm;         // 0..1: the sky greys and lowers under a building storm
 const float ATMO_PI = 3.14159265;
 
 float atmoDepth(float z, float dz, float len, float H) {
@@ -138,7 +139,10 @@ vec3 atmoSky(float z, vec3 d) {
     vec3 t;
     z *= u_atmoScale;
     vec3 day = atmoScatter(atmoDepthOut(z, dz, u_atmoHeights.x), atmoDepthOut(z, dz, u_atmoHeights.y), c, t);
-    return day + atmoNightSky(d) * u_atmoNight;
+    vec3 sky = day + atmoNightSky(d) * u_atmoNight;
+    // a storm: the blue drains out of the sky toward a heavy slate, darker overhead
+    float l = dot(sky, vec3(0.3, 0.59, 0.11));
+    return mix(sky, vec3(l) * vec3(0.78, 0.8, 0.88) * (0.85 - 0.35 * max(d.z, 0.0)), min(1.0, u_storm * 1.15));
 }
 /** aerial perspective: what a surface's colour becomes between it and the camera */
 vec3 atmoAerial(vec3 color, vec3 world) {

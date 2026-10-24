@@ -282,6 +282,12 @@ Colour-blind modes swap the crop-ready, sprite and storm cues to safe hues and k
 - **Sources:** procedural by default (Web Audio synthesis, ZzFX), plus the Kenney CC0 files already on
   disk in the other game folders. A synthesised piano will sound thin; if you want, I can propose CC0
   piano/string samples later and ask before downloading anything. Everything listed in `THIRD_PARTY.md`.
+- **As built (stage 7):** layers home / gliding / night / storm (68 bpm, F major pentatonic, D minor in a
+  storm), crossfaded over seconds; a conversation takes 6 dB off the music; the horn ducks the rest 8 dB, close
+  thunder 5 dB. Wind follows airspeed and height, with a gust swell a second before each push. Birds per band,
+  crickets at night. Thunder arrives at the speed of sound; far thunder with no flash while a storm builds.
+  Captions for each cue in §8 and §10. Mix levels measured by `tools/sound-mix.mjs`. Still to come: a discovery
+  layer, waterfall and grass sounds.
 
 ## 9. UI/UX
 

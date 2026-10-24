@@ -361,3 +361,55 @@ playtest: 62 fps at the end of the first loop.
 
 Not done: the characters have no walk cycle for hermits (they stand), the fluffballs' legs don't step, nobody has
 tried a conversation or the ending by hand, the ending's music and sound come with the audio pass (stage 7).
+
+## Stage 7: day, night, weather, audio
+
+Skills used: `threejs-precipitation-surfaces` (one shared weather envelope for every surface: wetness that
+rises in rain and dries after, puddles in low flat places, a camera-relative box of rain streaks that wraps),
+`audio-design` (buses and ducking, loudness checked by number, captions for every cue that matters, spatial
+placement), `threejs-atmosphere-aerial-perspective` (the storm greys the same sky model, it doesn't paint over
+it), `threejs-exposure-color-grading` (the eye doesn't fully adapt to a storm or to night).
+
+What was built:
+
+- `game/weather.js` (pure, deterministic): a storm's strength rises over 0.12 of a day (2.2 in-game hours)
+  before its rain, is full in it, fades after. While it blows, one seeded gust per 9 s: a 1 s swell you hear
+  first, 3 s of push (6–13 m/s sideways and a 3.2 m/s downdraft), then calm. Gusts act only on a glider.
+- The sim: storm-bloom takes only if sown in a storm (and says why otherwise); storm-amber appears only while one
+  blows.
+- Surfaces: every painted surface darkens a little when wet and gets a sky-and-sun sheen on what faces up; puddles
+  fill on flat ground, rippled by rings, reflecting the sky.
+- Sky: a storm drains the blue toward slate (rain too, less), cumulus darken from the base and tower 28 m, the
+  cloud sea goes grey, sky light and exposure drop, shadows go faint under cloud.
+- Lightning in a storm's rain: a flash that lights everything (`u_flash`), its thunder arriving at 343 m/s.
+  Before the rain, thunder far off with no flash.
+- Night: lit windows (a new surface kind), fireflies over restored grass, night exposure capped lower.
+- `gfx/rain.js`: 5 000 streaks in a 40 × 40 × 26 m box round the camera, wrapped in the vertex shader,
+  stretched along their fall and slanted by the wind; a shower uses about half, a storm all of them. Replaces
+  the point particles, which read as dots. Splashes on the island under the camera.
+- `game/sound.js`: buses (sfx, ui, ambience, music through its own conversation duck, then a duck bus; horn and
+  thunder on a bus that is never ducked), a limiter last. Wind from speed and height, with a whistle at speed and
+  a gust's swell; rain hiss and storm roar; birds per band (Meadow warblers, Orchard two-note calls, a falling cry
+  on the High Rocks), crickets at night on restored islands; thunder; the airship's horn from where the airship
+  is; a breath every 2 s when stamina is under a quarter. The score: piano and strings at 68 bpm in F major
+  pentatonic (D minor in a storm), layers for home, gliding, night and storm crossfading over seconds, everything
+  for the ending.
+- Captions (`#caption`) for: a storm building, rain starting, a gust coming and hitting, thunder near and far, the
+  airship's horn, a sprite arriving, breathing hard. HUD notice when a storm starts to build.
+- Kenney CC0 sound files copied from TIDEFALL's folder (nothing downloaded); `THIRD_PARTY.md` written.
+- Tools: `tools/sound-mix.mjs` (the mix per situation, RMS and peak from the master bus); views capture a third
+  time, rain, for every view (`skyfarm.weather("rain" | "storm" | "dry")`); perf has a storm view.
+
+Tests (`npm test`, all pass): the day-9 storm builds for 2.2 in-game hours and calm days have none; 10 gusts in
+90 s, each with its swell before it, the same every run; 18 s gliding in the storm ends 15.5 m lower and 66 m off
+its line (calm: 0.4 m); storm-bloom and storm-amber only in a storm. Economy and world checks unchanged.
+
+Measured: the mix (`tools/sound-mix.mjs`, dBFS): title -31 RMS, home by day -28, gliding -24, gliding high and
+fast -21, night -33, rain -22, storm -20, peaks -6 to -13, nothing near clipping; close thunder peaks 2 dB above
+the storm. Views: noon and golden captures within 0–5% of the stage-6 baselines (the grass is 4%); all 18,
+rain included, locked. Perf (one run, ms per frame, 1280 × 720 except Low at 960 × 540): Low 7.8–11.1,
+Medium 11.2–16.1, High 11.6–16.3; the storm view costs about the same as a clear day (Low +0.8 ms).
+
+Honest notes: nobody has listened to the mix: it was measured headless, by number. A synthesised piano is thin
+(GDD §8 already says so; CC0 samples need a download, so I haven't). Not done from GDD §8: a "discovery" music
+layer, waterfall and grass-rustle sounds, rain on roofs. The windmill reads too bright and grey in a storm.

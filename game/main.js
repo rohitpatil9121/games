@@ -1,4 +1,4 @@
-import { Game, Camera, PostFX, Audio } from "../engine/index.js";
+import { Game, Camera, PostFX } from "../engine/index.js";
 import { TICK_RATE, CROPS, STAMINA, GLIDE } from "./data.js";
 import { quantizeYaw } from "./det.js";
 import { makeWorld, WORLD, topAt } from "./islands.js";
@@ -11,6 +11,10 @@ import { makePilot, pilotInput, firstLoopPlan } from "./pilot.js";
 import { makeGradeLut } from "./gfx/grade.js";
 import { sell, buy, materials, nextMerchantDay, merchantAt } from "./progression.js";
 import { talkTo } from "./dialogue.js";
+import { weatherOf } from "./farm.js";
+import { shared } from "./gfx/common.js";
+import { Sound } from "./sound.js";
+import { islandUnder } from "./islands.js";
 import { finishTalk } from "./sim.js";
 import { TRADE } from "./data.js";
 
@@ -48,18 +52,11 @@ let pilot = null;
 /** a fixed camera for the baseline views (tools/views.mjs): { eye, target } or null */
 let shot = null;
 
-// ------------------------------------------------------------------ sound (ZzFX for now; the audio pass is stage 7)
-const audio = new Audio({ volume: 0.7 });
-audio.define("till", [0.6, 0.1, 160, 0.01, 0.05, 0.08, 4, 0.6, , , , , , 1.2]);
-audio.define("plant", [0.5, 0.05, 420, 0.005, 0.02, 0.06, 1, 1.6]);
-audio.define("water", [0.35, 0.3, 900, 0.03, 0.2, 0.25, 4, 0.2, , , , , , 3, , 0.2]);
-audio.define("harvest", [0.7, 0.05, 520, 0.01, 0.08, 0.2, 1, 1.4, , , 260, 0.06]);
-audio.define("pick", [0.6, 0.05, 880, 0.01, 0.05, 0.25, 1, 1.8, , , 440, 0.05]);
-audio.define("sprout", [0.45, 0, 1320, 0.01, 0.1, 0.35, 1, 2]);
-audio.define("open", [0.5, 0.2, 300, 0.02, 0.1, 0.2, 4, 0.4, 8]);
-audio.define("land", [0.5, 0.1, 110, 0.01, 0.05, 0.12, 4, 0.5]);
-audio.define("bump", [0.6, 0.1, 90, 0.01, 0.05, 0.2, 4, 1.2]);
-for (const type of ["pointerdown", "keydown"]) addEventListener(type, () => audio.unlock(), { once: true });
+// ------------------------------------------------------------------ sound (sound.js): effects, wind, rain, birds, the score, captions
+const sound = new Sound({ volume: 0.8 });
+for (const type of ["pointerdown", "keydown"]) addEventListener(type, () => sound.start(), { once: true });
+let captionTimer = 0;
+sound.onCaption = (text, seconds) => { $("caption").textContent = text; $("caption").classList.add("on"); captionTimer = seconds; };
 
 // ------------------------------------------------------------------ screens
 let screen = "title";
@@ -106,8 +103,15 @@ let toldSprites = false;
 function onEvent(e) {
     const p = state.player;
     if (["till", "plant", "water", "harvest", "pick", "sprout", "open", "land", "bump"].includes(e.type)) {
-        audio.play(e.type === "land" && e.hard ? "bump" : e.type, { pitch: 0.95 + Math.random() * 0.1 });
+        sound.play(e.type === "land" && e.hard ? "bump" : e.type);
     }
+    if (e.type === "jump" || e.type === "boost") sound.play(e.type, 0.8);
+    else if (e.type === "sold" || e.type === "bought") sound.play("coins");
+    else if (e.type === "upgraded" || e.type === "restored" || e.type === "bridge-built") sound.play("win", 0.6);
+    else if (e.type === "plank") { const b = world.data.bridges.find((q) => q.id === e.bridge); if (b) { const [A, B] = b.ends; sound.at("hammer", A[0] + (B[0] - A[0]) * e.t, A[1] + (B[1] - A[1]) * e.t, A[2] + (B[2] - A[2]) * e.t, 0.7); } }
+    else if (e.type === "sprite-arrives") { sound.at("sprite", e.x, e.y, p.z + 1); sound.caption("[A sprite chimes]"); }
+    else if (e.type === "gust") sound.caption("[A gust hits]", 1.5);
+    if (e.type === "needs-storm") notice("Storm-bloom only takes if it's sown while a storm blows.");
     if (e.type === "pick") notice(e.kind === "glider" ? "Grandmother's glider. Jump off an edge, then jump again to open it." : `${NAMES[e.crop] || e.crop} ${e.kind === "seed" ? "seeds" : ""} ×${e.count}`);
     else if (e.type === "harvest") notice(`${PRODUCE[e.crop]} ×${e.count}${e.pollinated ? " (the sprites helped)" : ""}${e.seeds ? ", and " + (e.seeds > 1 ? e.seeds + " seeds" : "a seed") + " back" : ""}`);
     else if (e.type === "wrong-band") notice(`${NAMES[e.crop]} won't grow here. It needs a garden in ${CROPS[e.crop].grows.map((b) => BAND[b]).join(" or ")}.`);
@@ -157,6 +161,7 @@ game.onRender((dt, alpha) => {
         rig.eye[0] = ex; rig.eye[1] = ey; rig.eye[2] = ez;
     } else rig.update(dt, pose, controls.view, world, settings);
     view3d.update(dt, state, pose, rig.eye);
+    listen(dt);
     hud(dt);
 });
 
@@ -175,7 +180,7 @@ function showLine() {
     $("talk-name").textContent = talk.speaker;
     $("talk-line").textContent = talk.lines[talk.i];
     $("talk-hint").textContent = talk.i < talk.lines.length - 1 ? "E / Space: next" : "E / Space: done";
-    audio.play("pick", { pitch: 0.7 + Math.random() * 0.15 });
+    sound.play("pick", 0.6, 0.7 + Math.random() * 0.15);
 }
 function nextLine() {
     if (!talk) return;
@@ -231,10 +236,38 @@ $("trade").addEventListener("click", (e) => {
     if (b.dataset.sell) sell(state, b.dataset.sell, Number(b.dataset.n));
     else if (b.dataset.buy) buy(state, b.dataset.buy, Number(b.dataset.n));
     else if (b.id === "trade-close") { play(); return; }
-    audio.play("pick", { pitch: 1.2 });
+    sound.play("coins");
     fillTrade();
 });
 addEventListener("keydown", (e) => { if (e.code === "Escape" && screen === "trade") play(); });
+
+// the weather, the airship and the place, told to the sound; the storm's telegraph (GDD §2: clouds building, then
+// the wind, a notice and a caption well before the rain)
+let wasStorm = 0, wasRain = false, wasMerchant = "away", wasWarn = 0, breathIn = 0;
+view3d.onThunder = (d) => sound.thunder(d);
+function listen(dt) {
+    const p = state.player, eye = rig.eye, isl = islandUnder(world, eye[0], eye[1], eye[2]);
+    sound.listen(eye, camera.right);
+    sound.update(dt, {
+        speed: p.mode === "glide" ? p.speed : Math.hypot(p.vx || 0, p.vy || 0), height: eye[2], gliding: p.mode === "glide",
+        raining: view3d.raining ? 1 : 0, storm: view3d.storm || 0, night: shared.u_atmoNight,
+        band: isl ? isl.band : "meadow", near: isl ? Math.max(0, 1 - (eye[2] - isl.top) / 60) : 0, restored: !!isl && state.progress.restored.has(isl.id),
+        talking: screen === "talk", ending: !!ending, playing: screen === "play", gustWarn: p.gustWarn || 0, gust: p.gust || 0,
+    });
+    const st = view3d.storm || 0;
+    if (st > 0.02 && wasStorm <= 0.02 && !view3d.raining) { notice("The clouds are building. A storm is coming: better to be on the ground."); sound.caption("[Wind rising: a storm is building]", 4); }
+    if (view3d.raining && !wasRain) sound.caption(st > 0.5 ? "[Heavy rain, a storm]" : "[Rain starts]", 3);
+    if (p.mode === "glide" && (p.gustWarn || 0) > 0 && wasWarn === 0) sound.caption("[A gust is coming]", 1.2);
+    wasStorm = st; wasRain = view3d.raining; wasWarn = p.gustWarn || 0;
+    // stamina low: a soft breath every two seconds under a quarter (the ring pulses with it, style.css)
+    if (p.mode === "glide" && p.stamina / STAMINA.max < 0.25 && p.stamina > 0) {
+        if ((breathIn -= dt) <= 0) { if (breathIn < -1) sound.caption("[Breathing hard: land soon]", 2); breathIn = 2; sound.play("breath", 0.7); }
+    } else breathIn = -2;
+    const m = merchantAt(state.tick).phase;
+    if (m === "arriving" && wasMerchant === "away") { const M = world.data.merchant.moor; sound.horn(M[0] + 700, M[1] - 900, M[2] + 120); }
+    wasMerchant = m;
+    if (captionTimer > 0 && (captionTimer -= dt) <= 0) $("caption").classList.remove("on");
+}
 
 function hud(dt) {
     const p = state.player, pouch = state.pouch;
@@ -262,7 +295,7 @@ function hud(dt) {
 
 // ------------------------------------------------------------------ test hook (the console, the tools)
 window.skyfarm = {
-    game, world, view: view3d, rig, controls, get state() { return state; },
+    game, world, view: view3d, rig, controls, sound, get state() { return state; },
     /** start a fresh game */
     reset() { state = createState(world); },
     /** a demonstration garden: every crop at home (or in its own band's garden) at a spread of growth, for screenshots */
@@ -279,6 +312,22 @@ window.skyfarm = {
             }
         }
         return k;
+    },
+    /**
+     * Jump to the middle of the next day with this weather ("rain" or "storm"), as wet as it gets, for screenshots;
+     * "dry" clears what an earlier one left.
+     * Returns the day.
+     */
+    weather(kind) {
+        // "dry": no wet surfaces, no cloud left over from an earlier capture
+        if (kind === "dry") { shared.u_wet = 0; view3d.overcast = 0; view3d.rainAmount = 0; return 0; }
+        let day = dayNumber(state);
+        while (weatherOf(state.seed, day).kind !== kind) day++;
+        const w = weatherOf(state.seed, day);
+        state.tick = (day - 1) * 72000 + Math.round((w.rainFrom + w.rainTo) / 2 * 72000);
+        state.weather = w;
+        shared.u_wet = 1; view3d.overcast = kind === "storm" ? 1.3 : 1; view3d.rainAmount = kind === "storm" ? 1 : 0.55;
+        return day;
     },
     /** open a conversation (for screenshots and tests) */
     talk(who) { openTalk(who); return talk && talk.lines; },

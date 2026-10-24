@@ -49,6 +49,9 @@ button:focus-visible { outline: 3px solid #3c6e3a; outline-offset: 3px; }
 #prompt.on { opacity: 1; }
 #notice { position: absolute; top: calc(var(--safe-t) + 40px); left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: 600; text-align: center; max-width: calc(100% - 32px); opacity: 0; transition: opacity 0.4s; }
 #notice.on { opacity: 1; }
+/* captions for sounds that matter (sound.js), above the pouch */
+#caption { position: absolute; bottom: calc(var(--safe-b, 0px) + 120px); left: 50%; transform: translateX(-50%); font-size: 16px; padding: 4px 12px; border-radius: 6px; background: rgba(20, 24, 36, 0.55); color: #f4efe2; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+#caption.on { opacity: 1; }
 /* stamina: a ring at the middle of the screen, only while it drains */
 #stamina { --f: 1; position: absolute; left: calc(50% + 90px); top: 52%; width: 46px; height: 46px; margin-left: -23px; border-radius: 50%; opacity: 0; transition: opacity 0.3s;
     background: conic-gradient(rgba(255, 246, 214, 0.9) calc(var(--f) * 360deg), rgba(255, 255, 255, 0.15) 0); -webkit-mask: radial-gradient(circle, transparent 15px, #000 16px); mask: radial-gradient(circle, transparent 15px, #000 16px); }

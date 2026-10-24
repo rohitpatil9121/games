@@ -209,7 +209,8 @@ const hermits = Object.entries(HERMITS).map(([island, id]) => {
 });
 for (const [island, material] of Object.entries(MATERIALS)) {
     const h = hearts.find((q) => q.island === island);
-    items.push({ kind: "material", material, count: 1, x: +(h.x + 1.5).toFixed(1), y: +(h.y + 1).toFixed(1), z: 0.5, island });
+    // storm-amber shows itself only while a storm blows (GDD §2)
+    items.push({ kind: "material", material, count: 1, x: +(h.x + 1.5).toFixed(1), y: +(h.y + 1).toFixed(1), z: 0.5, island, ...(material === "stormamber" ? { storm: true } : {}) });
 }
 
 const out = `/**

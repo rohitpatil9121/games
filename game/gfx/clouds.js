@@ -104,7 +104,7 @@ void main() {
         float d = length(at - isl.xy) / isl.z;
         shade *= mix(0.45, 1.0, smoothstep(0.75, 1.05, d));
     }
-    vec3 white = vec3(0.985, 0.985, 0.97), blue = vec3(0.79, 0.86, 0.94);
+    vec3 white = mix(vec3(0.985, 0.985, 0.97), vec3(0.62, 0.64, 0.7), u_storm), blue = mix(vec3(0.79, 0.86, 0.94), vec3(0.42, 0.45, 0.54), u_storm);
     // hollows hold the blue, heaps catch the light
     float heap = smoothstep(-0.6, 0.5, v_puff);
     vec3 albedo = mix(blue * 0.88, white, heap);
@@ -115,7 +115,8 @@ void main() {
     float rim = pow(1.0 - clamp(dot(n, view), 0.0, 1.0), 4.0);
     float behind = pow(clamp(dot(-view, u_sunDirection), 0.0, 1.0), 6.0);
     color += u_sunColor * rim * (0.25 + 1.6 * behind) * shade;
-    gl_FragColor = vec4(atmoAerial(color, w), 1.0);
+    // under a storm the whole sea goes slate, haze and all
+    gl_FragColor = vec4(atmoAerial(color, w) * (1.0 - 0.35 * u_storm), 1.0);
 }
 `;
 
@@ -189,6 +190,7 @@ attribute vec3 a_normal;
 attribute vec4 a_color;
 uniform mat4 u_model;
 uniform float u_time;
+uniform float u_storm;
 varying vec3 v_world;
 varying vec3 v_normal;
 varying float v_height;
@@ -197,6 +199,8 @@ void main() {
     // breathe: a slow swell along the normal, different at every place
     float s = sin(p.x * 0.05 + u_time * 0.21) * sin(p.y * 0.06 - u_time * 0.17) * sin(p.z * 0.04 + u_time * 0.13);
     p += a_normal * s * 1.2 * step(0.02, a_color.a);
+    // storm clouds tower: the tops heap up
+    p.z += u_storm * a_color.a * a_color.a * 28.0;
     vec4 w = u_model * vec4(p, 1.0);
     v_world = w.xyz;
     v_normal = a_normal;
@@ -214,8 +218,11 @@ void main() {
     vec3 w = v_world, n = normalize(v_normal);
     vec3 view = normalize(u_camPos - w);
     float lit = clamp((dot(n, u_sunDirection) + 0.5) / 1.5, 0.0, 1.0);
-    vec3 white = vec3(0.985, 0.985, 0.97), shadow = vec3(0.72, 0.8, 0.92);
-    vec3 albedo = mix(shadow, white, smoothstep(0.0, 0.55, v_height) * 0.6 + lit * 0.4);
+    // a storm: the cumulus darken to slate from the base up, and swell (vertex shader)
+    vec3 white = mix(vec3(0.985, 0.985, 0.97), vec3(0.6, 0.62, 0.68), u_storm), shadow = mix(vec3(0.72, 0.8, 0.92), vec3(0.28, 0.3, 0.38), u_storm);
+    vec3 albedo = mix(shadow, white, smoothstep(0.0, 0.55 + u_storm * 0.4, v_height) * 0.6 + lit * 0.4);
+    albedo *= 1.0 - 0.45 * u_storm;
+    albedo += vec3(0.8, 0.85, 1.0) * u_flash * 1.5;
     vec3 ambient = mix(u_groundColor * 0.7 + u_skyColor * 0.3, u_skyColor, n.z * 0.5 + 0.5) * 1.1;
     vec3 color = albedo * (u_sunColor * lit + ambient);
     float rim = pow(1.0 - clamp(dot(n, view), 0.0, 1.0), 3.0);

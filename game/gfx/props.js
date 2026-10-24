@@ -20,7 +20,7 @@ import { makeRandom } from "../det.js";
  * @module game/gfx/props
  */
 
-export const KIND = Object.freeze({ plaster: 0.05, timber: 0.15, tile: 0.25, stone: 0.35, cloth: 0.45, dark: 0.55, soil: 0.65, ridge: 0.75, glow: 0.85 });
+export const KIND = Object.freeze({ plaster: 0.05, timber: 0.15, tile: 0.25, stone: 0.35, cloth: 0.45, dark: 0.55, soil: 0.65, ridge: 0.75, glow: 0.85, window: 0.95 });
 const COLOR = {
     plaster: [0.93, 0.88, 0.76], timber: [0.47, 0.32, 0.21], tile: [0.82, 0.34, 0.25], stone: [0.7, 0.67, 0.6], cloth: [0.92, 0.86, 0.72],
     dark: [0.12, 0.13, 0.16], soil: [0.42, 0.28, 0.18], ridge: [0.64, 0.27, 0.2],
@@ -115,7 +115,7 @@ export function hearthProps(world) {
         const along = ny !== 0, wz = z0 + 1.25;
         const W = 0.9, H = 0.8, o = 0.16;
         const at = (dx, dz) => [x + (along ? dx : 0) + nx * o, y + (along ? 0 : dx) + ny * o, wz + dz];
-        parts.push(part(primitives.box(along ? W : 0.06, along ? 0.06 : W, H), at(0, 0), "dark"));
+        parts.push(part(primitives.box(along ? W : 0.06, along ? 0.06 : W, H), at(0, 0), "window", [0, 0, 0], [1, 1, 1], [0.12, 0.13, 0.16]));
         for (const [dx, dz, w, hh] of [[0, H / 2, W + 0.2, 0.1], [0, -H / 2, W + 0.3, 0.12], [-W / 2, 0, 0.1, H], [W / 2, 0, 0.1, H], [0, 0, W, 0.05], [0, 0, 0.05, H]]) {
             parts.push(part(primitives.box(along ? w : 0.1, along ? 0.1 : w, hh), at(dx, dz), "timber"));
         }
@@ -252,6 +252,7 @@ void main() {
 const fragment = /* glsl */ `
 ${header()}
 uniform float u_hasUv;
+uniform float u_time;
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec4 v_color;
@@ -294,7 +295,9 @@ void main() {
     }
     vec3 color = paint(albedo, w, n, wrap, kind > 0.4 && kind < 0.5 ? 0.3 : 0.0);
     // glow: lit from within (night flowers, sprites, lanterns), so bloom picks it up in the dark
-    if (kind > 0.8) color += albedo * 0.9;
+    if (kind > 0.8 && kind < 0.9) color += albedo * 0.9;
+    // windows: dark glass by day; at dusk and night a lamp is lit inside
+    if (kind > 0.9) color = mix(color + u_skyColor * 0.1, vec3(1.9, 1.15, 0.5) * (0.85 + 0.15 * vnoise(w.xy * 3.0 + u_time * 0.5)), u_atmoNight * 0.9 + 0.1 * u_storm);
     gl_FragColor = vec4(atmoAerial(color, w), 1.0);
 }
 `;
