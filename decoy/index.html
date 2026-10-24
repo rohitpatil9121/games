@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>DECOY</title>
+    <meta name="description" content="DECOY: hide as a prop, or hunt the props that are people. Multiplayer hide-and-seek in the browser, built on the Projection Lab engine.">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 rx=%273%27 fill=%27%23ffc93c%27/%3E%3Crect x=%274%27 y=%275%27 width=%278%27 height=%277%27 rx=%271%27 fill=%27%23231a02%27/%3E%3Ccircle cx=%276.5%27 cy=%278%27 r=%271%27 fill=%27%23ffc93c%27/%3E%3Ccircle cx=%279.5%27 cy=%278%27 r=%271%27 fill=%27%23ffc93c%27/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <canvas id="view" tabindex="0" aria-label="The map, seen through your eyes or from behind your prop"></canvas>
+
+    <div id="hud" aria-hidden="true" hidden>
+        <div id="blind" hidden><p class="big">Blindfolded</p><p id="blind-count"></p><p class="hint">The props are hiding. Listen.</p></div>
+        <div id="crosshair"><b></b></div>
+        <div id="hitmarker"></div>
+        <div id="damage"></div>
+        <div id="top">
+            <span id="round"></span>
+            <span id="clock">0:00</span>
+            <span id="teams"></span>
+        </div>
+        <div id="role" hidden></div>
+        <ul id="feed"></ul>
+        <div id="vitals">
+            <div class="stat"><span class="label">Health</span><span id="health" class="value">100</span></div>
+        </div>
+        <div id="kit">
+            <div id="seeker-kit" hidden>
+                <div class="meter"><span class="label">Scanner</span><i id="charge"></i></div>
+                <span class="chip" id="pings">Ping ×2</span>
+            </div>
+            <div id="hider-kit" hidden>
+                <span class="chip" id="prop-name">Box</span>
+                <span class="chip" id="locked">Free to turn</span>
+                <span class="chip" id="decoys">Decoy ×1</span>
+                <div class="meter taunt"><span class="label" id="taunt-label">Taunt in</span><i id="taunt"></i></div>
+            </div>
+        </div>
+        <div id="prompt" hidden></div>
+        <div id="ghost" hidden><p class="big">You are a ghost</p><p class="hint">Fly anywhere and watch. You are back next round.</p></div>
+        <div id="notice" hidden></div>
+        <div id="banner" hidden><p id="banner-title" class="big"></p><p id="banner-sub"></p></div>
+        <div id="tags"></div>
+        <ul id="chat-log"></ul>
+        <div id="scores" hidden>
+            <h2 id="scores-title">Scores</h2>
+            <p id="scores-sub"></p>
+            <table>
+                <thead><tr><th scope="col">Player</th><th scope="col">Score</th><th scope="col">Found</th><th scope="col">Ping</th></tr></thead>
+                <tbody id="scores-body"></tbody>
+            </table>
+        </div>
+        <pre id="debug" hidden></pre>
+    </div>
+
+    <button id="menu-button" aria-label="Pause menu" hidden>Menu</button>
+
+    <form id="chat-form" hidden>
+        <label for="chat-input">Say</label>
+        <input id="chat-input" type="text" maxlength="120" autocomplete="off" spellcheck="false">
+    </form>
+
+    <main id="title" class="screen">
+        <div class="card wide">
+            <h1>DECOY</h1>
+            <p class="lede">Hide as a prop. Hunt the props that breathe. Four to ten players, four rounds, sides swap every round.</p>
+
+            <label class="field" for="name">Your name
+                <input id="name" type="text" maxlength="16" autocomplete="nickname" spellcheck="false">
+            </label>
+
+            <section aria-labelledby="h-practice">
+                <h2 id="h-practice">Practice</h2>
+                <p class="hint">Offline, against bots. Runs in this page, with no server. A room you create online starts with these settings too.</p>
+                <div class="row">
+                    <label class="field" for="p-map">Map <select id="p-map"></select></label>
+                    <label class="field" for="p-bots">Players <select id="p-bots"></select></label>
+                    <label class="field" for="p-skill">Bot skill <select id="p-skill"><option value="1">Easy</option><option value="2">Medium</option><option value="3">Hard</option></select></label>
+                </div>
+                <button id="practice" class="primary">Play against bots</button>
+            </section>
+
+            <section aria-labelledby="h-online">
+                <h2 id="h-online">Online</h2>
+                <p class="hint" id="server-status">Looking for a server…</p>
+                <div class="row">
+                    <button id="quick" disabled>Quick play</button>
+                    <button id="create" disabled>Create a room</button>
+                </div>
+                <form id="join-form" class="row">
+                    <label class="field" for="code">Room code <input id="code" type="text" maxlength="4" autocomplete="off" spellcheck="false" placeholder="ABCD"></label>
+                    <button id="join" disabled>Join</button>
+                </form>
+            </section>
+            <button id="open-settings">Settings</button>
+            <p class="foot" id="build">Build 1</p>
+            <p class="foot">Built on <a href="https://rohitpatil9121.github.io/projection_library/">Projection Lab</a>.</p>
+        </div>
+    </main>
+
+    <div id="pause" class="screen" hidden>
+        <div class="card">
+            <h1 class="small">Paused</h1>
+            <p class="lede" id="pause-note">The round carries on behind this menu.</p>
+            <p id="room-line" class="room" hidden>Room <strong id="room-code"></strong> <button id="invite">Copy invite link</button></p>
+            <button id="resume" class="primary">Back to the round</button>
+            <button id="open-settings-2">Settings</button>
+            <button id="leave">Leave the match</button>
+            <fieldset id="host" hidden>
+                <legend>This room</legend>
+                <p class="hint">You are the host. Changing these starts a new match for everyone.</p>
+                <div class="row">
+                    <label class="field" for="h-map">Map <select id="h-map"></select></label>
+                    <label class="field" for="h-bots">Fill with bots to <select id="h-bots"></select></label>
+                    <label class="field" for="h-skill">Bot skill <select id="h-skill"><option value="1">Easy</option><option value="2">Medium</option><option value="3">Hard</option></select></label>
+                </div>
+                <button id="host-apply">Start a new match with these</button>
+            </fieldset>
+            <details id="net-test">
+                <summary>Network test</summary>
+                <p class="hint">Makes your own connection worse on purpose, to see how the game copes. F3 shows the numbers.</p>
+                <label class="slider" for="net-latency">Added ping <output id="net-latency-out"></output><input id="net-latency" type="range" min="0" max="400" step="10" value="0"></label>
+                <label class="slider" for="net-jitter">Jitter <output id="net-jitter-out"></output><input id="net-jitter" type="range" min="0" max="100" step="5" value="0"></label>
+                <label class="slider" for="net-loss">Packet loss <output id="net-loss-out"></output><input id="net-loss" type="range" min="0" max="20" step="1" value="0"></label>
+            </details>
+            <dl class="keys" id="pause-keys"></dl>
+        </div>
+    </div>
+
+    <div id="settings" class="screen" hidden>
+        <div class="card wide">
+            <h1 class="small">Settings</h1>
+            <section aria-labelledby="h-look">
+                <h2 id="h-look">Looking</h2>
+                <label class="slider" for="s-sensitivity">Sensitivity <output id="s-sensitivity-out"></output><input id="s-sensitivity" type="range" min="0.2" max="3" step="0.05"></label>
+                <label class="slider" for="s-fov">Field of view <output id="s-fov-out"></output><input id="s-fov" type="range" min="55" max="95" step="1"></label>
+                <label class="check" for="s-invert"><input id="s-invert" type="checkbox"> Invert up and down</label>
+            </section>
+            <section aria-labelledby="h-video">
+                <h2 id="h-video">Picture</h2>
+                <div class="row">
+                    <label class="field" for="s-quality">Quality <select id="s-quality"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
+                    <label class="field" for="s-motion">Reduce motion <select id="s-motion"><option value="system">As the system says</option><option value="on">On</option><option value="off">Off</option></select></label>
+                </div>
+                <div class="row">
+                    <label class="field" for="s-scheme">Team colours <select id="s-scheme"></select></label>
+                    <label class="field" for="s-outline">Outlines <select id="s-outline"></select></label>
+                </div>
+                <label class="check" for="s-bloom"><input id="s-bloom" type="checkbox"> Bloom (glow around bright things)</label>
+                <label class="check" for="s-shadows"><input id="s-shadows" type="checkbox"> Shadows</label>
+            </section>
+            <section aria-labelledby="h-sound">
+                <h2 id="h-sound">Sound</h2>
+                <label class="slider" for="s-volume">Volume <output id="s-volume-out"></output><input id="s-volume" type="range" min="0" max="1" step="0.05"></label>
+                <label class="slider" for="s-music">Music <output id="s-music-out"></output><input id="s-music" type="range" min="0" max="1" step="0.05"></label>
+            </section>
+            <section aria-labelledby="h-keys">
+                <h2 id="h-keys">Controls</h2>
+                <p class="hint">Press a button, then the key, mouse button or gamepad button you want. Escape cancels. The gamepad's right stick looks.</p>
+                <div id="bindings"></div>
+                <button id="bindings-reset">Put the controls back as they were</button>
+            </section>
+            <button id="settings-back" class="primary">Done</button>
+        </div>
+    </div>
+
+    <script type="module" src="game/main.js?v=1"></script>
+</body>
+</html>
