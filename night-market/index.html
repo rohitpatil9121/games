@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="NIGHT MARKET: a street-food tycoon game where every vendor and regular is a character.">
+    <meta name="theme-color" content="#07060f">
+    <title>NIGHT MARKET</title>
+    <link rel="preload" href="vendor/fonts/SpaceGrotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <canvas id="view" aria-label="A food street at night: stalls under neon signs, vendors behind their counters and customers walking between them"></canvas>
+    <div id="labels" aria-hidden="true"></div>
+    <div id="fade" class="on" aria-hidden="true"></div>
+
+    <!-- ============ TITLE ============ -->
+    <main id="title" class="screen hidden">
+        <div class="titleBlock">
+            <p class="eyebrow">A STREET-FOOD TYCOON</p>
+            <h1 class="wordmark" aria-label="Night Market"><span>NIGHT</span><span>MARKET</span></h1>
+            <p class="lede">Ten nights. One street. Hire well, and mind who stands next to whom.</p>
+            <div class="menu">
+                <button id="continueBtn" class="btn primary hidden">Continue</button>
+                <button id="newBtn" class="btn primary">New street</button>
+                <button class="btn" data-open="settings">Settings</button>
+            </div>
+            <p id="bestLine" class="dim small"></p>
+        </div>
+        <footer class="foot">
+            <span>Built on <a href="https://github.com/rohitpatil9121/projection_library" target="_blank" rel="noopener">Projection Lab</a></span>
+        </footer>
+    </main>
+
+    <!-- ============ HUD ============ -->
+    <section id="hud" class="hidden" aria-label="Your street">
+        <header class="topbar">
+            <div class="glass pill nightTag" id="nightTag">
+                <span class="mono dimLabel">NIGHT</span><b class="mono" id="hudNight">1</b><span class="mono dim" id="hudOf">/10</span>
+                <span class="clock mono" id="hudClock">18:00</span>
+                <span class="clockBar" aria-hidden="true"><i id="clockFill"></i></span>
+                <span id="hudWeather" class="weather hidden"></span>
+            </div>
+            <div class="stats">
+                <div class="glass pill stat cash" title="Cash"><span class="ico" data-icon="coin" data-size="22"></span><b class="mono" id="hudCash">$400</b></div>
+                <div class="glass pill stat" title="Reputation: more of it brings more customers"><span class="ico" data-icon="star" data-size="20"></span><b class="mono" id="hudRep">30</b></div>
+                <div class="glass pill stat" title="Rent, due when tonight closes"><span class="ico" data-icon="rent" data-size="20"></span><b class="mono" id="hudRent">$35</b></div>
+            </div>
+            <div class="topRight">
+                <div class="glass pill speed hidden" id="speedCtl" role="group" aria-label="Game speed">
+                    <button data-speed="0" aria-label="Pause (Space)" title="Pause (Space)"><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg></button>
+                    <button data-speed="1" aria-label="Normal speed (1)" title="Normal (1)">1×</button>
+                    <button data-speed="2" aria-label="Double speed (2)" title="Fast (2)">2×</button>
+                    <button data-speed="4" aria-label="Four times speed (3)" title="Faster (3)">4×</button>
+                </div>
+                <button class="iconBtn glass" id="menuBtn" aria-label="Menu (Esc)" title="Menu (Esc)"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+            </div>
+        </header>
+
+        <ul id="feed" class="feed" aria-live="polite" aria-label="What's happening on the street"></ul>
+
+        <aside id="card" class="card side glass hidden" aria-label="Details"></aside>
+
+        <!-- before opening -->
+        <div id="dock" class="dock glass">
+            <p id="hint" class="status" aria-live="polite"></p>
+            <div class="tabs" role="tablist" aria-label="Preparation">
+                <button role="tab" id="tab-stalls" data-tab="stalls" aria-selected="true" aria-controls="panel">Stalls</button>
+                <button role="tab" id="tab-staff" data-tab="staff" aria-selected="false" aria-controls="panel">Staff</button>
+                <button role="tab" id="tab-managers" data-tab="managers" aria-selected="false" aria-controls="panel">Managers</button>
+                <button role="tab" id="tab-street" data-tab="street" aria-selected="false" aria-controls="panel">Street</button>
+            </div>
+            <div id="panel" class="panel" role="tabpanel"></div>
+            <button id="openBtn" class="go" aria-label="Open for the night"><span class="long">Open for <br>the night</span><span class="short">Open</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 5l7 7-7 7"/></svg></button>
+        </div>
+
+        <!-- while the market is open -->
+        <div id="nightBar" class="dock nightBar glass hidden" aria-label="Tonight so far">
+            <div class="fact"><small>SERVED</small><b class="mono" id="nbServed">0</b></div>
+            <div class="fact"><small>WALKED OUT</small><b class="mono" id="nbAngry">0</b></div>
+            <div class="fact"><small>TAKINGS</small><b class="mono" id="nbCash">$0</b></div>
+            <div class="fact"><small>REVIEWS</small><b class="mono" id="nbStars">–</b></div>
+            <div class="fact wide"><small>ON THE STREET</small><div id="nbWho" class="who"></div></div>
+        </div>
+    </section>
+
+    <!-- ============ CLOSING ============ -->
+    <section id="closing" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="closingTitle">
+        <div class="card modal glass left">
+            <p class="eyebrow" id="closingEyebrow">CLOSING TIME</p>
+            <h2 id="closingTitle">Night 1</h2>
+            <div class="ledger" id="ledger"></div>
+            <div class="repRow" id="repRow"></div>
+            <div id="moments" class="moments"></div>
+            <div id="staffRows" class="staffRows"></div>
+            <div class="actions"><button id="closingNext" class="btn primary">Continue</button></div>
+        </div>
+    </section>
+
+    <!-- ============ EVENT ============ -->
+    <section id="event" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="eventTitle">
+        <div class="card modal glass left">
+            <div class="eventHead"><div id="eventWho"></div><div><p class="eyebrow">AFTER CLOSING</p><h2 id="eventTitle"></h2></div></div>
+            <p id="eventText" class="eventText"></p>
+            <div id="eventChoices" class="choices"></div>
+            <p id="eventResult" class="eventResult hidden" aria-live="polite"></p>
+            <div class="actions"><button id="eventNext" class="btn primary hidden">Continue</button></div>
+        </div>
+    </section>
+
+    <!-- ============ WHILE YOU WERE AWAY ============ -->
+    <section id="offline" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="offlineTitle">
+        <div class="card modal glass">
+            <span class="bigIcon" data-icon="away" data-size="64"></span>
+            <p class="eyebrow">WELCOME BACK</p>
+            <h2 id="offlineTitle">While you were away</h2>
+            <p class="dim" id="offlineText"></p>
+            <p class="offlineCash mono" id="offlineCash">+$0</p>
+            <div class="actions"><button id="offlineBtn" class="btn primary">Collect</button></div>
+        </div>
+    </section>
+
+    <!-- ============ CAMPAIGN OVER ============ -->
+    <section id="over" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="overTitle">
+        <div class="card modal glass">
+            <p class="eyebrow" id="overEyebrow"></p>
+            <h2 id="overTitle"></h2>
+            <div class="bigStars hidden" id="overStars"><span>★</span><span>★</span><span>★</span></div>
+            <p class="dim" id="overText"></p>
+            <div class="facts">
+                <div><small>NIGHTS</small><b class="mono" id="overNights">0</b></div>
+                <div><small>CASH</small><b class="mono" id="overCash">$0</b></div>
+                <div><small>REPUTATION</small><b class="mono" id="overRep">0</b></div>
+            </div>
+            <div class="actions">
+                <button id="endlessBtn" class="btn primary hidden">Keep the street open</button>
+                <button id="retryBtn" class="btn hidden">Replay last night</button>
+                <button id="overNew" class="btn">New street</button>
+                <button id="overTitleBtn" class="btn ghost">Title screen</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ PAUSE / SETTINGS ============ -->
+    <section id="pause" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+        <div class="card modal glass">
+            <h2 id="pauseTitle">Paused</h2>
+            <div class="actions col">
+                <button id="resumeBtn" class="btn primary">Back to the street</button>
+                <button id="restartNightBtn" class="btn">Restart this night</button>
+                <button class="btn" data-open="settings">Settings</button>
+                <button id="pauseTitleBtn" class="btn ghost">Save and go to title</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="settings" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="card modal glass left">
+            <div class="row head"><h2 id="settingsTitle">Settings</h2><button class="iconBtn" data-close aria-label="Close settings"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <label class="setRow"><span>Sound effects</span><input id="setSfx" type="range" min="0" max="1" step="0.05"></label>
+            <label class="setRow"><span>Ambient music</span><input id="setMusic" type="range" min="0" max="1" step="0.05"></label>
+            <label class="setRow"><span>Bloom and glow<small>Turn off on slower devices</small></span><input id="setBloom" type="checkbox" class="switch"></label>
+            <label class="setRow"><span>Shadows and soft shading<small>Sun shadows and ambient occlusion. Turn off on slower devices</small></span><input id="setShadows" type="checkbox" class="switch"></label>
+            <label class="setRow"><span>Reduce motion<small>No camera shake or drift, fewer particles</small></span><input id="setMotion" type="checkbox" class="switch"></label>
+            <div class="setRow"><span>Tutorial<small>Walks you through the first night of a new street</small></span><button id="replayTutorial" class="btn small">Show again</button></div>
+            <div class="setRow"><span>Saved street<small>Your campaign and best result</small></span><button id="resetProgress" class="btn small danger">Erase</button></div>
+            <div class="help">
+                <p class="eyebrow">CONTROLS</p>
+                <p><kbd>Click</kbd> anyone or any stall to see who they are · <kbd>Drag</kbd> to move along the street · <kbd>Wheel</kbd> or pinch to zoom</p>
+                <p><kbd>A</kbd> <kbd>D</kbd> move · <kbd>Q</kbd> <kbd>E</kbd> turn · <kbd>Z</kbd> <kbd>X</kbd> zoom · <kbd>Space</kbd> pause · <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> speed · <kbd>Esc</kbd> menu</p>
+            </div>
+        </div>
+    </section>
+
+    <div id="coach" class="coach hidden" role="status" aria-live="polite">
+        <p id="coachText"></p>
+        <div class="coachActions"><button id="coachSkip" class="link">Skip the tutorial</button><button id="coachNext" class="btn small primary">Got it</button></div>
+    </div>
+
+    <div id="toast" class="toast glass" role="status" aria-live="polite"></div>
+
+    <script type="module" src="game/main.js"></script>
+</body>
+
+</html>

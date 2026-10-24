@@ -1,0 +1,11 @@
+{
+  "name": "night-market",
+  "private": true,
+  "type": "module",
+  "description": "NIGHT MARKET: a street-food tycoon game built on Projection Lab",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "balance": "node tools/balance.mjs",
+    "models": "node tools/make-models.mjs"
+  }
+}

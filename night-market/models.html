@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Models · NIGHT MARKET</title>
+    <style>
+        html, body { margin: 0; height: 100%; background: #10131f; color: #eef; font: 14px/1.5 system-ui, sans-serif; }
+        canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+        #bar { position: fixed; left: 10px; right: 10px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+        #bar button { min-height: 40px; padding: 6px 12px; border-radius: 10px; border: 1px solid #556; background: #1c2136; color: #eef; cursor: pointer; }
+        #bar button[aria-pressed="true"] { background: #ffc060; color: #1c0a12; border-color: transparent; }
+        #info { position: fixed; left: 10px; top: 10px; font: 12px ui-monospace, monospace; color: #9aa6cf; }
+    </style>
+</head>
+<body>
+    <canvas id="view" aria-label="Every model in the game laid out in rows: people, the dog, the stalls and the street props"></canvas>
+    <div id="info"></div>
+    <div id="bar" role="group" aria-label="Animation"></div>
+    <script type="module">
+        // Model viewer: every generated model in daylight, with the people playing one animation clip.
+        // Drag to orbit, wheel to zoom. Rebuild the models with `npm run models`.
+        import { Game, Entity, Mesh, StandardMaterial, ShadowMap, PostFX, primitives } from "./engine/index.js";
+        import { loadAssets } from "./game/assets.js";
+        import { Character, makeDog } from "./game/characters.js";
+        import { STALLS } from "./game/data.js";
+
+        const game = new Game({ canvas: document.getElementById("view"), antialias: false });
+        const { scene, camera, renderer } = game;
+        renderer.postfx = new PostFX(renderer, { ao: { enabled: true, radius: 0.6 }, bloom: { threshold: 1.05, intensity: 0.7 }, vignette: 0.25, grain: 0.01 });
+        scene.clearColor.set([0.6, 0.75, 0.95, 1]);
+        scene.sunDirection.set([0.4, -0.55, 0.73]); scene.sunColor.set([1.0, 0.93, 0.8]);
+        scene.skyColor.set([0.36, 0.42, 0.56]); scene.groundColor.set([0.22, 0.2, 0.18]);
+        scene.shadow = new ShadowMap({ center: [0, 2, 0], extent: [16, 12], depth: 60, size: 2048 });
+        game.add(new Entity({ mesh: new Mesh(primitives.plane(80, 80), new StandardMaterial({ color: [0.7, 0.72, 0.68] })) }));
+
+        const assets = await loadAssets();
+        const people = [];
+        const looks = [];
+        for (let i = 0; i < 8; i++) looks.push({ skin: i % 5, shirt: (i * 5) % 12, pants: i % 4, hair: i % 5, hairStyle: i % 4, h: 0.94 + (i % 3) * 0.06 });
+        const props = [null, "apron", "backpack", "tophat", "shades", "cap", "notebook", "flag"];
+        looks.forEach((look, i) => {
+            const c = new Character(assets, look, { prop: props[i], accent: STALLS[["skewers", "dumplings", "noodles", "tea"][i % 4]].color });
+            c.setFace(["neutral", "happy", "annoyed", "angry", "tired", "happy", "neutral", "happy"][i]);
+            c.root.setPosition(-7 + i * 2, -3, 0);
+            c.root.setYaw(Math.PI);        // face the camera
+            game.add(c.root);
+            people.push(c);
+        });
+        const dog = makeDog(assets);
+        dog.root.setPosition(-9, -3, 0);
+        dog.root.setYaw(Math.PI);
+        game.add(dog.root);
+        dog.animator.play("idle");
+
+        const material = new StandardMaterial({ vertexColors: true });
+        const put = (geometry, x, y, z = 0) => { const e = game.add(new Entity({ mesh: new Mesh(geometry, material) })); e.rotation.set(assets.upright); e.setPosition(x, y, z); return e; };
+        ["skewers", "dumplings", "noodles", "takoyaki", "tea", "rival"].forEach((type, i) => {
+            const a = assets.stalls[type];
+            for (const part of ["body", "level2", "level3"]) put(a.geometry(part), -8.75 + i * 3.5, 0);
+        });
+        ["table", "stool", "bollard", "planter", "crate", "barrel", "lantern", "festoon", "display_fruit", "display_bread", "food_skewers", "food_dumplings", "food_noodles", "food_takoyaki", "food_tea"].forEach((name, i) => put(assets.props.geometry(name), -7 + i * 1.5, -6, name.startsWith("food") || name === "lantern" || name === "festoon" ? 1 : 0));
+
+        const bar = document.getElementById("bar");
+        const play = (name) => { for (const c of people) c.play(name); [...bar.children].forEach((b) => b.setAttribute("aria-pressed", String(b.textContent === name))); };
+        for (const clip of assets.person.clips) { const b = document.createElement("button"); b.textContent = clip.name; b.onclick = () => play(clip.name); bar.appendChild(b); }
+        for (const name of ["idle", "walk", "sit"]) { const b = document.createElement("button"); b.textContent = "dog: " + name; b.onclick = () => dog.animator.play(name); bar.appendChild(b); }
+        play("walk");
+
+        camera.distance = 24; camera.pitch = 0.45; camera.target.set([0, 0, 1.2]); camera.fov = 30;
+        game.onUpdate(() => {
+            const p = game.input.pointer;
+            if (p.dragging) camera.orbit(-p.dx * 0.006, p.dy * 0.006);
+            if (p.wheel) camera.zoom(Math.exp(p.wheel * 0.001));
+        });
+        const info = document.getElementById("info");
+        game.onRender((dt) => {
+            for (const c of people) c.update(dt);
+            dog.animator.update(dt);
+            const s = renderer.stats;
+            info.textContent = `${s.drawCalls} draws + ${s.shadowCalls} shadow · ${Math.round(s.triangles / 1000)}k triangles · ${Math.round(game.loop.fps)} fps`;
+        });
+        game.start();
+        window.viewer = { game, assets, people, dog, play };
+    </script>
+</body>
+</html>

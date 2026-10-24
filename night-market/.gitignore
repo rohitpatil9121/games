@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+# asset packs: only the GLB models and licences are kept in the repository
+assets/packs/*/Models/FBX format/
+assets/packs/*/Models/OBJ format/
+assets/packs/*/Models/Textures/
+assets/packs/*/Previews/
+assets/packs/*/*.url
+assets/packs/*/*.html
+assets/packs/*/*.png
