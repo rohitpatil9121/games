@@ -83,6 +83,8 @@ const BRIDGES = [["hearth", "daisy"], ["hearth", "willow"], ["hearth", "fluff"],
 const MATERIALS = { kite: "skysilk", glass: "frostglass", storm: "stormamber" };
 /** where the merchant's airship moors (off Hearth Isle's east rim) and where Captain Bram stands to trade */
 const MERCHANT = { moor: [38, -25, 63], gangway: [22, -17.5] };
+/** the hermits (GDD §6), each by their island's landmark */
+const HERMITS = { bell: "ona", kite: "pell", hive: "mabel", eagle: "tor", lantern: "iris" };
 
 const rand = makeRandom(WORLD_SEED);
 const islands = SKELETON.map(([id, name, band, x, y, top, radius, landmark, role]) => {
@@ -195,6 +197,16 @@ const hearts = islands.map((i) => {
     const x = +(i.landmark.x + Math.cos(a) * 6).toFixed(1), y = +(i.landmark.y + Math.sin(a) * 6).toFixed(1);
     return { island: i.id, x, y, z: +topAt(I, x, y).toFixed(2), bridged: BRIDGES.some(([p, q]) => p === i.id || q === i.id) };
 });
+// hermits: a few metres from their landmark toward the island's middle, facing out over it
+const hermits = Object.entries(HERMITS).map(([island, id]) => {
+    const i = by[island], I = prepare(structuredClone(i)), solids = landmarkShapes(I, (x, y) => topAt(I, x, y)).filter((s) => s.solid).map(shapeBox);
+    let a = Math.atan2(i.y - i.landmark.y, i.x - i.landmark.x) || 1, x = 0, y = 0;
+    for (let k = 0; k < 24; k++, a += 0.5) {
+        x = i.landmark.x + Math.cos(a) * 7; y = i.landmark.y + Math.sin(a) * 7;
+        if (!solids.some((b) => x > b.x0 - 1 && x < b.x1 + 1 && y > b.y0 - 1 && y < b.y1 + 1) && topAt(I, x, y) > -Infinity && !(i.trees || []).some((t) => Math.hypot(t.x - x, t.y - y) < 3)) break;
+    }
+    return { id, island, x: +x.toFixed(1), y: +y.toFixed(1), z: +topAt(I, x, y).toFixed(2), yaw: +Math.atan2(i.y - y, i.x - x).toFixed(3) };
+});
 for (const [island, material] of Object.entries(MATERIALS)) {
     const h = hearts.find((q) => q.island === island);
     items.push({ kind: "material", material, count: 1, x: +(h.x + 1.5).toFixed(1), y: +(h.y + 1).toFixed(1), z: 0.5, island });
@@ -213,6 +225,7 @@ export const GARDENS = ${JSON.stringify(gardens)};
 export const BRIDGES = ${JSON.stringify(bridges)};
 export const HEARTS = ${JSON.stringify(hearts)};
 export const MERCHANT = ${JSON.stringify(MERCHANT)};
+export const HERMITS = ${JSON.stringify(hermits)};
 `;
 const file = fileURLToPath(new URL("../game/world-data.js", import.meta.url));
 writeFileSync(file, out);

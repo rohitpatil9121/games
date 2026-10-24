@@ -112,7 +112,9 @@ compromise. I'll measure Medium in stage 2 and drop the raymarched skin if it do
   near a crop patch gives +50% yield. Rare sprites want rarer combos (blue + white near water, star-lilies
   at night). It's a light placement puzzle, not a timer.
 - **Win:** reconnect all three bands and bring the three Old Seeds (one from a hermit in each band) to the
-  giant tree on the Crown. Cinematic, then free play. **No lose state.** The only danger is optional:
+  giant tree on the Crown. Cinematic, then free play. *(As built: Ona gives the Meadow's seed once the Old
+  Mill turns, Mabel the Orchard's once sprites have visited your garden, Iris the High Rocks' once the Orchard
+  Gate rings. Planting them wakes the tree, which blossoms, and every island still parched turns green.)* **No lose state.** The only danger is optional:
   storms.
 - **Goals:** this minute: reach that island, water that row. This day: a full harvest, a meal, a bridge,
   the merchant. This game: wake the giant tree.

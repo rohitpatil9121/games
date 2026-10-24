@@ -2,6 +2,7 @@ import { TICK_RATE, DT, BTN, MOVE, GLIDE, STAMINA, SKY, DAY_TICKS, FARM, CROPS, 
 import { grow, farmDawn, weatherOf, harvestOf, afterHarvest, growsIn, cook, cookable, stepSprites } from "./farm.js";
 import { makeProgress, activeAir, restore, deckBelow, overRail, bridgeEndNear, missingFor, startBridge, stepBridges, heartNear, merchantAt, upgradeAvailable, applyUpgrade } from "./progression.js";
 import { BOOST } from "./data.js";
+import { talkTo, applyEffects } from "./dialogue.js";
 import { dsin, dcos, datan2, clamp, PI, TAU, yawOf } from "./det.js";
 import { sample, makeAir } from "./air.js";
 import { topAt, groundBelow, solidAt, boxAt, islandUnder, gardenAt } from "./islands.js";
@@ -62,7 +63,11 @@ export function createState(world, options = {}) {
         }),
         pouch: { seeds: Object.fromEntries(CROP_IDS.map((c) => [c, 0])), crops: Object.fromEntries(CROP_IDS.map((c) => [c, 0])), selected: "",
             /** bought and found things that aren't crops: bridge parts and the glider's rare materials */
-            materials: { planks: 0, fittings: 0, skysilk: 0, frostglass: 0, stormamber: 0 } },
+            materials: { planks: 0, fittings: 0, skysilk: 0, frostglass: 0, stormamber: 0, oldseed_meadow: 0, oldseed_orchard: 0, oldseed_high: 0 } },
+        /** what's happened that conversations remember (dialogue.js) */
+        flags: new Set(),
+        /** the tick the great tree woke (the ending), or 0 */
+        ended: 0,
         /** bridges, restored islands, coins, the glider's tier (progression.js) */
         progress: makeProgress(world),
         /** produce lost in the clouds, waiting to wash up at dawn */
@@ -135,6 +140,7 @@ export function step(state, input = NO_INPUT) {
     grow(state, 1);
     stepPlayer(state, state.player, input);
     stepSprites(state);
+    if (state.events.some((e) => e.type === "pollinated")) state.flags.add("pollinated");
     stepBridges(state);
     return state;
 }
@@ -421,6 +427,10 @@ function aim(state, p) {
     if (Math.hypot(p.x - d.stove.x, p.y - d.stove.y) < 1.3) { p.does = cookable(state.pouch) ? "cook" : "stove"; return; }
     // the shed's workbench: upgrade the glider with a rare material
     if (Math.hypot(p.x - d.shed.x, p.y - d.shed.y) < 2.2 && upgradeAvailable(state)) { p.does = "upgrade"; return; }
+    // a hermit to talk to, or the great tree on the Crown
+    for (const h of d.hermits || []) if (Math.hypot(p.x - h.x, p.y - h.y) < 2.4 && Math.abs(p.z - h.z) < 2) { p.does = "talk"; p.talk = h.id; return; }
+    const crown = (d.hearts || []).find((h) => h.island === "crown");
+    if (crown && !state.ended && Math.hypot(p.x - crown.x, p.y - crown.y) < 2.2) { p.does = "talk"; p.talk = "crown"; return; }
     // Captain Bram, while the airship is moored
     if (d.merchant && merchantAt(state.tick).phase === "moored" && Math.hypot(p.x - d.merchant.gangway[0], p.y - d.merchant.gangway[1]) < 2.5) { p.does = "trade"; return; }
     // a heart stone to wake, or a broken bridge's end
@@ -471,6 +481,7 @@ function act(state, p) {
         return;
     }
     if (does === "upgrade") { applyUpgrade(state); return; }
+    if (does === "talk") { state.events.push({ type: "talk-open", who: p.talk }); return; }
     if (does === "trade") { state.events.push({ type: "trade-open" }); return; }
     if (does === "wake") { const h = heartNear(state, p.x, p.y); restore(state, h.island, "heart"); return; }
     if (does === "build" || does === "bridge") {
@@ -502,6 +513,26 @@ function act(state, p) {
         return;
     }
     state.events.push({ type: does, ix, iy, crop: plot.crop });
+}
+
+/**
+ * A conversation has been read to its end (the UI calls this; so do the tests): apply what it gives. If it was the
+ * great tree's, the three Old Seeds are planted and the ending begins: the Crown wakes, and with it every island
+ * still parched turns green.
+ */
+export function finishTalk(state, who) {
+    const t = talkTo(who, state);
+    if (!t) return null;
+    applyEffects(state, t.do);
+    state.events.push({ type: "talk-done", who });
+    if (who === "crown" && state.flags.has("ending") && !state.ended) {
+        for (const k of ["oldseed_meadow", "oldseed_orchard", "oldseed_high"]) state.pouch.materials[k]--;
+        state.ended = state.tick;
+        restore(state, "crown", "tree");
+        for (const isl of state.world.islands) restore(state, isl.id, "tree");
+        state.events.push({ type: "ending" });
+    }
+    return t;
 }
 
 /** FNV-1a over everything that matters, for determinism tests. */

@@ -48,6 +48,19 @@
   <div id="notice" role="status"></div>
   <div id="stamina" aria-hidden="true"></div>
 </div>
+<div id="talk" hidden role="dialog" aria-live="polite" aria-labelledby="talk-name">
+  <div id="talk-name"></div>
+  <p id="talk-line"></p>
+  <div id="talk-hint" class="small"></div>
+</div>
+<section id="ending" class="screen" hidden aria-labelledby="ending-h">
+  <div class="panel">
+    <h2 id="ending-h">The great tree is awake</h2>
+    <p class="tag">Its roots hold the wind again, and every island is green. The sky is whole.</p>
+    <p class="small">Thank you for playing. Your farm, your bridges and the whole sky are still yours: keep playing as long as you like.</p>
+    <button id="ending-close" class="primary">Back to the sky</button>
+  </div>
+</section>
 <div id="fade" aria-live="polite"></div>
 
 <script type="module" src="game/main.js"></script>

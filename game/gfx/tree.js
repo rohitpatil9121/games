@@ -50,6 +50,22 @@ export const APPLE = Object.freeze({
     leafDark: [0.2, 0.38, 0.16], leafLight: [0.6, 0.78, 0.32],
 });
 
+/**
+ * The Crown's great tree (the ending): a Ghibli camphor, wider than it is tall. A short, enormous trunk; many long
+ * limbs leaving low and spreading out almost flat; a broad, layered crown of big leaf masses. It blossoms when it
+ * wakes (the leaf material's u_bloom).
+ */
+export const ELDER = Object.freeze({
+    ...OAK,
+    levels: [
+        { length: 0.3, radius: 1.5, taper: 0.55, children: 9, emerge: [0.45, 1.0], angle: 1.15, gnarl: 0.08, up: 0.0, sections: 8, radial: 18 },
+        { length: 0.85, radius: 0.5, taper: 0.35, children: 4, emerge: [0.35, 1.0], angle: 0.7, gnarl: 0.16, up: 0.05, sections: 7, radial: 10 },
+        { length: 0.5, radius: 0.55, taper: 0.25, children: 0, emerge: [0, 0], angle: 0.5, gnarl: 0.2, up: 0.1, sections: 4, radial: 6 },
+    ],
+    roots: 10, mass: [2.4, 3.6], massRef: 15 * 1.8, cards: 60,
+    leafDark: [0.16, 0.34, 0.18], leafLight: [0.5, 0.74, 0.32],
+});
+
 const norm = (v) => { const m = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / m, v[1] / m, v[2] / m]; };
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k];
@@ -324,6 +340,7 @@ const leafFragment = /* glsl */ `
 ${header()}
 uniform vec3 u_leafDark;
 uniform vec3 u_leafLight;
+uniform float u_bloom;      // 0 leaves .. 1 in full blossom (the great tree, waking)
 varying vec3 v_world;
 varying vec3 v_normal;
 varying vec2 v_uv;
@@ -348,7 +365,11 @@ void main() {
     // deep inside the crown is cool and dark; the sunlit top is warm and bright
     vec3 albedo = mix(u_leafDark, u_leafLight, smoothstep(0.25, 0.95, lit) * (1.0 - v_depth * 0.55));
     albedo *= 0.92 + 0.16 * vnoise(v_world.xy * 1.3 + v_world.z);
+    // blossom: pink-white flowers over the outside of the crown, glowing a little
+    float petals = smoothstep(0.35, 0.7, vnoise(v_world.xy * 1.7 + v_world.z * 0.9)) * (1.0 - v_depth);
+    albedo = mix(albedo, mix(vec3(0.95, 0.52, 0.66), vec3(1.0, 0.82, 0.88), petals), u_bloom * (0.3 + 0.6 * petals));
     vec3 color = paint(albedo, v_world, n, 0.55, 0.45) * (1.0 - v_depth * 0.35);
+    color += albedo * u_bloom * petals * 0.15;
     gl_FragColor = vec4(atmoAerial(color, v_world), 1.0);
 }
 `;
@@ -357,6 +378,6 @@ void main() {
 export function treeMaterials(species = OAK) {
     return {
         bark: track(new ShaderMaterial({ name: "bark", vertex: barkVertex, fragment: barkFragment, uniforms: withShared({ u_bark: Float32Array.from(species.bark) }) })),
-        leaves: track(new ShaderMaterial({ name: "leaves", vertex: leafVertex, fragment: leafFragment, uniforms: withShared({ u_leafDark: Float32Array.from(species.leafDark), u_leafLight: Float32Array.from(species.leafLight) }), cull: "none" })),
+        leaves: track(new ShaderMaterial({ name: "leaves", vertex: leafVertex, fragment: leafFragment, uniforms: withShared({ u_leafDark: Float32Array.from(species.leafDark), u_leafLight: Float32Array.from(species.leafLight), u_bloom: 0 }), cull: "none" })),
     };
 }

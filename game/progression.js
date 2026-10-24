@@ -133,7 +133,8 @@ export function stepBridges(state) {
 
 /** the heart stone the player is next to, on an island that waking restores (no bridge reaches it) */
 export function heartNear(state, x, y) {
-    for (const h of state.world.data.hearts || []) if (!h.bridged && !state.progress.restored.has(h.island) && Math.hypot(h.x - x, h.y - y) < 1.6) return h;
+    // (the Crown's heart is the great tree's: it wakes only with the three Old Seeds, through talk "crown")
+    for (const h of state.world.data.hearts || []) if (!h.bridged && h.island !== "crown" && !state.progress.restored.has(h.island) && Math.hypot(h.x - x, h.y - y) < 1.6) return h;
     return null;
 }
 

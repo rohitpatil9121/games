@@ -318,3 +318,46 @@ Not done or not checked:
 - Bram has no dialogue yet (stage 6); the trade panel is the whole conversation.
 - A person hasn't tried building a bridge, the trade panel or the gust boost; the playtest only covers the first
   loop. Frame time was not re-measured this stage (12 bridge meshes and the airship add up to 14 draws).
+
+## Stage 6: people, creatures, the ending
+
+Skills used: `dialogue-systems` (the custom-runner path: a graph as data with line IDs into a string table,
+conditions and effects as short strings, every branch walked by a test), `game-ai` and
+`ai-behavior-trees-utility-ai` (utility scoring with considerations and stickiness for the fluffballs; steering
+for all three kinds), `img2threejs` (its staged method, blockout → structure → form → material, with a written
+spec per character; **without a reference image**, which this pipeline can't have, so the characters are
+designed, not reconstructed), `disney-animation-rule-skill` (overlap: arms a beat behind legs; follow-through: the
+head settles after the body; secondary action: breathing, weight shift, talking hands).
+
+What was built:
+
+- `game/dialogue.js`: 20 entries for Ona, Pell, Mabel, Tor, Iris, Captain Bram and the Crown; gifts of seeds, the
+  three Old Seeds behind world conditions (the Old Mill restored, sprites seen, the Orchard Gate restored).
+- The sim: talking (near a hermit, Bram before trading, the Crown), `finishTalk` applies a conversation's gifts;
+  the ending (three Old Seeds at the Crown) wakes the great tree and restores every island.
+- `gfx/characters.js`: a character kit (five joints: body, head, two arms, two legs) and a cast of seven: the
+  gardener (straw hat, red scarf, satchel), Ona (shawl, bun), Pell (goggles, long scarf), Mabel (bee hat, apron),
+  Tor (beard, fur cap, cane), Iris (long hair, glasses, a robe with glowing stars, a lantern), Bram (captain's cap,
+  white beard). Procedural idle, walk, glide and talk poses; heads turn toward a player who comes near.
+- `gfx/creatures.js`: fluffballs (graze, wander, curious, flee, follow if you carry turnips, nap at night,
+  huddle in rain), birds circling every thermal and flying alongside a nearby glider, fish that dart from a
+  shadow at the pond's edge and gather near someone standing still.
+- The ending: the camera circles the Crown for 14 s while the great tree (its own wide-crowned species) blossoms
+  pink and petals blow off it, then a card, then free play.
+- Dialogue box and ending card in the UI.
+
+Changed: the sun's arc moved 0.08 of a day earlier, so waking at 06:30 is a golden morning instead of a dark
+one with stars (seen in a screenshot of the first conversation); every baseline re-locked for it.
+
+Tests (`npm test`, all pass): every line written and every entry reachable; Ona's, Mabel's and Iris's seeds
+arrive only once their conditions hold; the three seeds at the Crown end the game and green all 20 islands;
+without them the Crown only says what it's waiting for.
+
+Measured: shadow casters had grown to 66–72 draws (bridge stubs, birds, hearts, far bridges); now only near
+bridges, the people and the fluffballs cast: 34–40. `npm run perf` Medium in two runs this stage: hut door 12.9
+and 18.0 ms, grass 11.2 and 14.0, wide 19.7 and 11.2. Run-to-run noise on this machine is now about ±4 ms, too
+wide to call the budget met or missed; stage 8 has to measure with many runs and a median. The real-input
+playtest: 62 fps at the end of the first loop.
+
+Not done: the characters have no walk cycle for hermits (they stand), the fluffballs' legs don't step, nobody has
+tried a conversation or the ending by hand, the ending's music and sound come with the audio pass (stage 7).

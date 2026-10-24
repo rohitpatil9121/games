@@ -15,6 +15,8 @@ import { MOVE, TICK_RATE, BTN } from "../game/data.js";
 import { makeRandom } from "../game/det.js";
 import { weatherOf, rainingAt } from "../game/farm.js";
 import { onBridge, merchantAt, sell, buy, nextMerchantDay } from "../game/progression.js";
+import { TALKS, STRINGS, talkTo } from "../game/dialogue.js";
+import { finishTalk } from "../game/sim.js";
 import { CROPS, DAY_TICKS, WEATHER } from "../game/data.js";
 
 let failed = 0;
@@ -220,6 +222,34 @@ const world = makeWorld(WORLD);
     standAt(world.data.shed.x + 1.2, world.data.shed.y - 1.2);
     press(40, () => s.progress.tier === 1);
     check(s.progress.tier === 1 && p.glide === 11 && p.staminaMax === 90, `sky-silk at the workbench: tier ${s.progress.tier}, glide ${p.glide}:1, stamina ${p.staminaMax} s`);
+}
+
+// ---------------------------------------------------------------- people and the ending (stage 6)
+{
+    // the graph: every line exists; every entry's condition can come true (by what an earlier entry or the world sets)
+    const missing = Object.values(TALKS).flat().flatMap((e) => e.lines).filter((id) => !STRINGS[id]);
+    const setters = new Set(Object.values(TALKS).flat().flatMap((e) => e.do || []).filter((f) => f.startsWith("flag:")).map((f) => f.slice(5)));
+    setters.add("pollinated");
+    const unreachable = Object.entries(TALKS).flatMap(([who, es]) => es.filter((e) => (e.if || "").split(" ").filter((c) => c.startsWith("flag:")).some((c) => !setters.has(c.slice(5)))).map(() => who));
+    check(!missing.length && !unreachable.length, `dialogue: ${Object.values(TALKS).flat().length} entries for ${Object.keys(TALKS).length} speakers, every line written, every entry reachable${missing.length ? " (missing " + missing.join(", ") + ")" : ""}`);
+
+    // the story, end to end, through the same calls the UI makes
+    const s = createState(world), say = (who) => finishTalk(s, who);
+    say("ona");
+    const sunflowers = s.pouch.seeds.sunflower;
+    say("ona");
+    const noSeedYet = s.pouch.materials.oldseed_meadow === 0;
+    s.progress.restored.add("mill"); say("ona");
+    say("mabel"); const berries = s.pouch.seeds.berry, noOrchardSeed = s.pouch.materials.oldseed_orchard === 0;
+    s.flags.add("pollinated"); say("mabel");
+    say("iris"); s.progress.restored.add("ogate"); say("iris");
+    const three = ["oldseed_meadow", "oldseed_orchard", "oldseed_high"].every((k) => s.pouch.materials[k] === 1);
+    check(sunflowers === 3 && noSeedYet && berries === 2 && noOrchardSeed && three, "Ona gives sunflowers, then the Meadow seed once the mill turns; Mabel berries, then the Orchard seed after sprites; Iris the High seed once the gate rings");
+    const before = s.progress.restored.size;
+    say("crown");
+    check(s.ended > 0 && s.progress.restored.size === world.islands.length && s.pouch.materials.oldseed_high === 0, `the three seeds at the Crown wake the tree: the ending, and every island green (${before} → ${s.progress.restored.size} restored)`);
+    const t = talkTo("crown", createState(world));
+    check(t.lines[0] === STRINGS.crown_need, "without the seeds the Crown only says what it's waiting for");
 }
 
 console.log(failed ? `${failed} failed` : "all passed");

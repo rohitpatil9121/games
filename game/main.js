@@ -10,6 +10,8 @@ import { Controls, defaultBindings, keyHint } from "./controls.js";
 import { makePilot, pilotInput, firstLoopPlan } from "./pilot.js";
 import { makeGradeLut } from "./gfx/grade.js";
 import { sell, buy, materials, nextMerchantDay, merchantAt } from "./progression.js";
+import { talkTo } from "./dialogue.js";
+import { finishTalk } from "./sim.js";
 import { TRADE } from "./data.js";
 
 /**
@@ -66,6 +68,8 @@ function show(name) {
     $("title").hidden = name !== "title";
     $("pause").hidden = name !== "pause";
     $("trade").hidden = name !== "trade";
+    $("talk").hidden = name !== "talk";
+    $("ending").hidden = name !== "ending";
     $("hud").hidden = name === "title";
     controls.active = name === "play";
     controls.showTouch(name === "play");
@@ -107,7 +111,10 @@ function onEvent(e) {
     if (e.type === "pick") notice(e.kind === "glider" ? "Grandmother's glider. Jump off an edge, then jump again to open it." : `${NAMES[e.crop] || e.crop} ${e.kind === "seed" ? "seeds" : ""} ×${e.count}`);
     else if (e.type === "harvest") notice(`${PRODUCE[e.crop]} ×${e.count}${e.pollinated ? " (the sprites helped)" : ""}${e.seeds ? ", and " + (e.seeds > 1 ? e.seeds + " seeds" : "a seed") + " back" : ""}`);
     else if (e.type === "wrong-band") notice(`${NAMES[e.crop]} won't grow here. It needs a garden in ${CROPS[e.crop].grows.map((b) => BAND[b]).join(" or ")}.`);
-    else if (e.type === "trade-open") openTrade();
+    else if (e.type === "trade-open") openTalk("bram", true);
+    else if (e.type === "talk-open") openTalk(e.who);
+    else if (e.type === "gift") gift(e);
+    else if (e.type === "ending") startEnding();
     else if (e.type === "bridge-needs") notice(`This bridge needs ${Object.entries(e.cost).map(([k, n]) => n + " " + k).join(", ")}. Still missing: ${Object.entries(e.missing).map(([k, n]) => n + " " + k).join(", ")}.`);
     else if (e.type === "build-start") notice("The bridge is going up...");
     else if (e.type === "bridge-built") notice(`The bridge is done. ${world.byId[e.b].name} is green again.`);
@@ -129,7 +136,7 @@ function notice(text) { $("notice").textContent = text; $("notice").classList.ad
 function fade(text) { const f = $("fade"); f.textContent = text; f.classList.remove("on"); void f.offsetWidth; f.classList.add("on"); }
 
 const DOES = { till: "Till", plant: "Plant", water: "Water", harvest: "Harvest", pick: "Pick up", sleep: "Sleep", cook: "Cook", stove: "Stove",
-    upgrade: "Fit to the glider", trade: "Trade with Captain Bram", wake: "Wake the heart stone", build: "Build the bridge", bridge: "Look at the broken bridge" };
+    upgrade: "Fit to the glider", trade: "Trade with Captain Bram", talk: "Talk", wake: "Wake the heart stone", build: "Build the bridge", bridge: "Look at the broken bridge" };
 game.onRender((dt, alpha) => {
     if (!window.__firstFrame) window.__firstFrame = performance.now();
     controls.look(dt);
@@ -141,6 +148,7 @@ game.onRender((dt, alpha) => {
     pose.z = tele ? p.z : prev.z + (p.z - prev.z) * a;
     pose.glide = p.mode === "glide" ? 1 : 0;
     pose.yaw = p.yaw; pose.pitch = p.pitch; pose.roll = settings.reducedMotion ? p.roll * 0.3 : p.roll; pose.fx = p.fx; pose.fy = p.fy; pose.speed = p.speed;
+    endingCamera(dt);
     if (shot) {
         // a fixed view: the engine's orbit camera, solved for this eye and target
         const [ex, ey, ez] = shot.eye, [tx, ty, tz] = shot.target, dx = ex - tx, dy = ey - ty, dz = ez - tz, d = Math.hypot(dx, dy, dz);
@@ -151,6 +159,62 @@ game.onRender((dt, alpha) => {
     view3d.update(dt, state, pose, rig.eye);
     hud(dt);
 });
+
+// ------------------------------------------------------------------ conversations (dialogue.js; sim.js finishTalk applies what they give)
+let talk = null;
+function openTalk(who, thenTrade = false) {
+    const t = talkTo(who, state);
+    if (!t) { if (thenTrade) openTrade(); return; }
+    talk = { ...t, i: 0, thenTrade };
+    view3d.talking = who;
+    show("talk");
+    if (document.pointerLockElement) document.exitPointerLock();
+    showLine();
+}
+function showLine() {
+    $("talk-name").textContent = talk.speaker;
+    $("talk-line").textContent = talk.lines[talk.i];
+    $("talk-hint").textContent = talk.i < talk.lines.length - 1 ? "E / Space: next" : "E / Space: done";
+    audio.play("pick", { pitch: 0.7 + Math.random() * 0.15 });
+}
+function nextLine() {
+    if (!talk) return;
+    if (++talk.i < talk.lines.length) { showLine(); return; }
+    const t = talk;
+    talk = null; view3d.talking = "";
+    finishTalk(state, t.who);
+    for (const e of state.events) onEvent(e);
+    state.events.length = 0;
+    if (screen === "talk") { if (t.thenTrade) openTrade(); else play(); }
+}
+addEventListener("keydown", (e) => { if (screen === "talk" && ["KeyE", "Space", "Enter"].includes(e.code)) { e.preventDefault(); nextLine(); } else if (screen === "talk" && e.code === "Escape") { talk = null; view3d.talking = ""; play(); } });
+$("talk").addEventListener("click", nextLine);
+function gift(e) {
+    const what = e.what === "seeds" ? `${NAMES[e.id]} seeds ×${e.n}` : e.what === "material" ? ({ oldseed_meadow: "The Meadow's Old Seed", oldseed_orchard: "The Orchard's Old Seed", oldseed_high: "The High Rocks' Old Seed" })[e.id] || e.id : "";
+    if (what) notice(`Received: ${what}`);
+}
+
+// ------------------------------------------------------------------ the ending (GDD §4): the camera circles the Crown while it blooms, then a card, then free play
+let ending = null;
+function startEnding() {
+    const c = world.byId.crown;
+    ending = { t: 0, x: c.landmark.x, y: c.landmark.y, z: c.top };
+    show("play");
+    controls.active = false;
+}
+function endingCamera(dt) {
+    if (!ending) return false;
+    ending.t += dt;
+    const k = Math.min(1, ending.t / 14), a = 0.6 + k * 2.4, r = 70 - 25 * k;
+    shot = { eye: [ending.x + Math.cos(a) * r, ending.y + Math.sin(a) * r, ending.z + 20 + 18 * (1 - k)], target: [ending.x, ending.y, ending.z + 22], fov: 55 };
+    // the tree blossoms over the first half of the shot
+    view3d.stream.trees.elder.leaves.values.u_bloom = Math.min(1, ending.t / 7);
+    // petals on the wind from the waking tree
+    if (Math.random() < dt * 40) view3d.sparkle.emit(3, { position: [ending.x, ending.y, ending.z + 22 + Math.random() * 15], spread: 14, velocity: [2, 1, -0.6], speed: 1.5, life: [3, 6], size: [0.25, 0.1], color: [1.9, 1.3, 1.5, 1], colorEnd: [1.6, 1.1, 1.3, 0] });
+    if (ending.t > 14 && screen !== "ending") { show("ending"); $("ending-close").focus(); }
+    return true;
+}
+$("ending-close").addEventListener("click", () => { ending = null; shot = null; play(); });
 
 // ------------------------------------------------------------------ trading with Captain Bram (progression.js sell / buy)
 function openTrade() { show("trade"); if (document.pointerLockElement) document.exitPointerLock(); fillTrade(); $("trade-close").focus(); }
@@ -216,6 +280,8 @@ window.skyfarm = {
         }
         return k;
     },
+    /** open a conversation (for screenshots and tests) */
+    talk(who) { openTalk(who); return talk && talk.lines; },
     /** let the test pilot play the first loop */
     autopilot() { pilot = makePilot(firstLoopPlan(world)); return true; },
     /** Run the game by hand for some seconds (the Browser pane may throttle requestAnimationFrame). */

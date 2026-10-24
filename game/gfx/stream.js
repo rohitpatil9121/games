@@ -2,7 +2,7 @@ import { Entity, Mesh, Geometry, primitives, mat4 } from "../../engine/index.js"
 import { topAt } from "../islands.js";
 import { islandGeometry, terrainMaterial } from "./terrain.js";
 import { buildGrass } from "./grass.js";
-import { growTreeSteps, growPine, treeMaterials, OAK, APPLE } from "./tree.js";
+import { growTreeSteps, growPine, treeMaterials, OAK, APPLE, ELDER } from "./tree.js";
 import { hearthProps, propMaterial, part } from "./props.js";
 import { landmarkGeometry } from "./landmarks.js";
 import { waterGeometry, waterMaterials } from "./water.js";
@@ -44,7 +44,7 @@ export class Streamer {
         this.quality = view.quality;
         this.pm = propMaterial(false);
         this.pmUv = propMaterial(true);
-        this.trees = { oak: treeMaterials(OAK), apple: treeMaterials(APPLE), pine: treeMaterials({ ...OAK, leafDark: [0.13, 0.27, 0.2], leafLight: [0.4, 0.6, 0.38], bark: [0.36, 0.27, 0.22] }) };
+        this.trees = { oak: treeMaterials(OAK), apple: treeMaterials(APPLE), elder: treeMaterials(ELDER), pine: treeMaterials({ ...OAK, leafDark: [0.13, 0.27, 0.2], leafLight: [0.4, 0.6, 0.38], bark: [0.36, 0.27, 0.22] }) };
         this.water = waterMaterials();
         this.jobs = [];
         this.stats = { built: { mid: 0, near: 0 }, freed: { mid: 0, near: 0 }, worstMs: 0, lastMs: 0, frames: 0 };
@@ -94,10 +94,10 @@ export class Streamer {
         const trees = [...(isl.trees || [])];
         if (home && d.tree) trees.push({ ...d.tree, kind: "oak" });
         if (isl.landmark.kind === "big-tree") trees.push({ x: isl.landmark.x, y: isl.landmark.y, seed: isl.seed, height: 22, kind: "apple" });
-        if (isl.landmark.kind === "giant-tree") trees.push({ x: isl.landmark.x, y: isl.landmark.y, seed: isl.seed, height: 42, kind: "oak" });
+        if (isl.landmark.kind === "giant-tree") trees.push({ x: isl.landmark.x, y: isl.landmark.y, seed: isl.seed, height: 34, kind: "elder" });
         for (const t of trees) {
             const at = { x: t.x, y: t.y, z: topAt(isl, t.x, t.y), seed: t.seed, height: t.height };
-            const g = t.kind === "pine" ? growPine(at) : yield* growTreeSteps(at, t.kind === "apple" ? APPLE : OAK);
+            const g = t.kind === "pine" ? growPine(at) : yield* growTreeSteps(at, t.kind === "apple" ? APPLE : t.kind === "elder" ? ELDER : OAK);
             if (!kinds.has(t.kind)) kinds.set(t.kind, { bark: [], leaves: [] });
             kinds.get(t.kind).bark.push({ geometry: g.bark }); kinds.get(t.kind).leaves.push({ geometry: g.leaves });
             fruit.push(...g.fruit);

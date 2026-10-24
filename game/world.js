@@ -11,7 +11,9 @@ import { Streamer } from "./gfx/stream.js";
 import { part, KIND, propMaterial } from "./gfx/props.js";
 import { drawCrops, drawSprites } from "./gfx/crops.js";
 import { bridgeGeometry, brokenGeometry } from "./gfx/bridges.js";
-import { airshipGeometry, bramGeometry } from "./gfx/airship.js";
+import { airshipGeometry } from "./gfx/airship.js";
+import { Character } from "./gfx/characters.js";
+import { Creatures } from "./gfx/creatures.js";
 import { merchantAt } from "./progression.js";
 import { rainingAt } from "./farm.js";
 import { makeRandom } from "./det.js";
@@ -115,7 +117,7 @@ export class World {
         // bridges: a broken and a built mesh for each; the built one draws a prefix while it's going up
         this.bridges = (world.data.bridges || []).map((b) => {
             const built = bridgeGeometry(b), e = add(new Entity({ name: "bridge", mesh: new Mesh(built.geometry, pm) }));
-            const broken = add(new Entity({ name: "bridge-broken", mesh: new Mesh(brokenGeometry(b), pm) }));
+            const broken = add(new Entity({ name: "bridge-broken", castShadow: false, mesh: new Mesh(brokenGeometry(b), pm) }));
             e.cullRadius = built.radius; e.visible = false;
             return { b, built, e, broken, shown: -1 };
         });
@@ -123,15 +125,26 @@ export class World {
         const hearts = (world.data.hearts || []).filter((h) => !h.bridged);
         this.hearts = hearts.map((h) => {
             const g = Geometry.merge([part(primitives.sphere(0.5, 12, 8), [0, 0, 0.35], "stone", [0, 0, 0], [0.9, 0.8, 0.7]), part(primitives.sphere(0.5, 10, 8), [0, 0, 0.75], "glow", [0, 0, 0], [0.32, 0.32, 0.32], [0.6, 1.6, 1.3])], { uvs: false });
-            const e = add(new Entity({ name: "heart", mesh: new Mesh(g, pm) }));
+            const e = add(new Entity({ name: "heart", castShadow: false, mesh: new Mesh(g, pm) }));
             e.setPosition(h.x, h.y, h.z);
             return { h, e };
         });
+        this.creatures = new Creatures(world, this.root, pm);
         // the merchant's airship and Captain Bram
         this.airship = add(new Entity({ name: "airship", mesh: new Mesh(airshipGeometry(), pm) }));
         this.airship.cullRadius = 20; this.airship.visible = false;
-        this.bram = add(new Entity({ name: "bram", mesh: new Mesh(bramGeometry(), pm) }));
+        this.bramC = new Character("bram", pm);
+        this.bram = add(this.bramC.root);
         this.bram.visible = false;
+        // the hermits, each by their landmark, facing out over their island
+        this.hermits = (world.data.hermits || []).map((h) => {
+            const c = new Character(h.id, pm);
+            add(c.root);
+            c.root.setPosition(h.x, h.y, h.z); c.root.setYaw(h.yaw);
+            return { h, c };
+        });
+        /** who the player is talking to (main.js sets it), for the talking pose */
+        this.talking = "";
         const M = world.data.merchant;
         if (M) { this.bram.setPosition(M.gangway[0], M.gangway[1], topAt(world.islands[0], M.gangway[0], M.gangway[1])); this.bram.setYaw(Math.PI); }
 
@@ -141,7 +154,8 @@ export class World {
         this.cursor = add(new Entity({ name: "cursor", castShadow: false, mesh: new Mesh(Geometry.merge(frame, { uvs: false }), pm) }));
 
         // the player
-        this.body = add(new Entity({ name: "player", mesh: new Mesh(playerGeometry(), pm) }));
+        this.player = new Character("gardener", pm);
+        this.body = add(this.player.root);
         this.canopy = add(new Entity({ name: "canopy", mesh: new Mesh(canopyGeometry(), propMaterial(false)) }));
         this.canopyOpen = 0;
 
@@ -177,7 +191,8 @@ export class World {
         const scene = this.scene;
         // the sun rises in the east (+x), arcs across the south (-y), sets in the west at the start of blue hour.
         // Elevation goes as sin², so it lingers low after sunrise and before sunset: golden hour is ~10° up.
-        const arc = Math.min(1, t / DAY.blue) * Math.PI, se = Math.sin(arc);
+        // (shifted so the sun is already ~6° up when you wake, and sets at the start of blue hour)
+        const arc = Math.min(1, (t + 0.08) / (DAY.blue + 0.08)) * Math.PI, se = Math.sin(arc);
         let sx = Math.cos(arc), sy = -0.42, sz = 0.82 * se * se - 0.015;
         let m = Math.hypot(sx, sy, sz);
         sx /= m; sy /= m; sz /= m;
@@ -234,8 +249,9 @@ export class World {
         syncShared();
         this.sky.setPosition(eye[0], eye[1], eye[2]);
         this.stream.update(eye, state.progress.restored, dt);
-        this.drawBridges(state);
+        this.drawBridges(state, eye);
         this.drawMerchant(state, eye);
+        this.creatures.update(dt, state, eye, this.time);
         for (const k of this.hearts) k.e.visible = !state.progress.restored.has(k.h.island);
         // the cloud sea shows the shadows of the eight islands nearest the camera
         const u = this.seaMat.values.u_islands, near = this.stream.records.slice().sort((p, q) => p.dist - q.dist);
@@ -253,6 +269,18 @@ export class World {
             quat.rotateX(qb, qb, pose.roll);
         } else quat.setAxisAngle(qb, [0, 0, 1], Math.atan2(pose.fy, pose.fx));
         this.body.setPosition(pose.x, pose.y, pose.z + (pose.glide ? 0.25 : 0));
+        const ground = Math.hypot(state.player.vx, state.player.vy);
+        this.player.animate(dt, pose.glide ? "glide" : ground > 0.3 && state.player.ground ? "walk" : this.talking ? "talk" : "idle", ground, 0);
+        // the people: animate those near the camera, hide the rest; heads turn toward a player who comes close
+        for (const { h, c } of this.hermits) {
+            const d = Math.hypot(h.x - eye[0], h.y - eye[1], h.z - eye[2]);
+            c.root.visible = d < 160;
+            if (!c.root.visible) continue;
+            const pd = Math.hypot(pose.x - h.x, pose.y - h.y), toward = Math.atan2(pose.y - h.y, pose.x - h.x) - h.yaw;
+            const look = pd < 10 ? Math.atan2(Math.sin(toward), Math.cos(toward)) : 0;
+            c.animate(dt, this.talking === h.id ? "talk" : "idle", 0, look);
+        }
+        if (this.bram.visible) this.bramC.animate(dt, this.talking === "bram" ? "talk" : "idle", 0, 0);
         const o = this.canopyOpen;
         this.canopy.visible = o > 0.03;
         if (this.canopy.visible) {
@@ -307,9 +335,11 @@ export class World {
     }
 
     /** each bridge: broken, going up plank by plank, or built */
-    drawBridges(state) {
+    drawBridges(state, eye) {
         for (const r of this.bridges) {
             const s = state.progress.bridges[r.b.id];
+            // only a bridge near the camera can throw a shadow anyone sees (the cascades reach 70 m)
+            r.e.castShadow = Math.hypot(r.built.middle[0] - eye[0], r.built.middle[1] - eye[1]) < r.built.radius + 80;
             r.broken.visible = s.state === "broken";
             r.e.visible = s.state !== "broken";
             if (s.state === "building") {

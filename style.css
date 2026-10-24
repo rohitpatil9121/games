@@ -19,6 +19,14 @@ button { font: inherit; color: var(--ink); background: #fff; border: 2px solid #
 button.primary { background: var(--roof); color: #fff8ee; border-color: var(--roof); font-weight: 700; font-size: 18px; }
 button:focus-visible { outline: 3px solid #3c6e3a; outline-offset: 3px; }
 
+/* conversations: a soft paper box at the bottom, the speaker's name on a tab */
+#talk { position: fixed; left: 50%; bottom: calc(var(--safe-b) + 20px); transform: translateX(-50%); width: min(640px, calc(100% - 32px)); background: var(--paper); border-radius: 16px; box-shadow: 0 8px 30px rgba(50, 70, 90, 0.28); padding: 18px 22px 14px; color: var(--ink); }
+#talk[hidden] { display: none; }
+#talk-name { position: absolute; top: -14px; left: 18px; background: var(--roof); color: #fff8ee; font-weight: 700; padding: 4px 14px; border-radius: 999px; font-size: 15px; }
+#talk-name:empty { display: none; }
+#talk-line { margin: 4px 0 8px; font-size: 18px; line-height: 1.45; }
+#talk-hint { text-align: right; }
+
 /* the trade panel */
 .panel.wide { max-width: 640px; }
 .trade-cols { display: flex; gap: 18px; width: 100%; flex-wrap: wrap; }
