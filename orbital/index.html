@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="ORBITAL: a gravity puzzle. Place planets to bend a comet's path through space.">
+    <meta name="theme-color" content="#04050c">
+    <title>ORBITAL</title>
+    <link rel="preload" href="vendor/fonts/SpaceGrotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <canvas id="view" aria-label="A star system: planets, a comet and a portal on a grid that bends under gravity"></canvas>
+    <div id="fade" aria-hidden="true"></div>
+
+    <!-- ============ TITLE ============ -->
+    <main id="title" class="screen">
+        <div class="titleBlock">
+            <p class="eyebrow">A GRAVITY PUZZLE</p>
+            <h1 class="wordmark" aria-label="Orbital">O<span>R</span>B<span>I</span>T<span>A</span>L</h1>
+            <p class="lede">Place worlds. Bend the path. Reach the light.</p>
+            <div class="menu">
+                <button id="playBtn" class="btn primary"><span id="playLabel">Begin</span></button>
+                <button id="chartBtn" class="btn">Star chart</button>
+                <button id="sandboxBtn" class="btn">Sandbox</button>
+            </div>
+        </div>
+        <footer class="foot">
+            <span>Built on <a href="https://github.com/rohitpatil9121/projection_library" target="_blank" rel="noopener">Projection Lab</a></span>
+            <span class="footRight"><button class="iconBtn" data-open="settings" aria-label="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 2.9-1.2V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0 1.2 2.9h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></span>
+        </footer>
+    </main>
+
+    <!-- ============ STAR CHART ============ -->
+    <section id="chart" class="screen hidden" aria-label="Star chart: choose a level">
+        <header class="chartHead">
+            <button class="btn ghost" id="chartBack">← Back</button>
+            <div>
+                <p class="eyebrow">STAR CHART</p>
+                <h2>Choose a system</h2>
+            </div>
+            <div class="chartTotal"><span class="star on">★</span> <b id="starTotal">0</b><span class="dim"> / 36</span></div>
+        </header>
+        <div id="constellation">
+            <svg id="chartLines" aria-hidden="true"></svg>
+            <div id="chartNodes"></div>
+        </div>
+        <aside id="chartInfo" class="glass" aria-live="polite">
+            <p class="eyebrow" id="infoNum">SYSTEM 01</p>
+            <h3 id="infoName">First Light</h3>
+            <p id="infoText" class="dim"></p>
+            <div class="row"><span id="infoStars" class="stars"></span><button id="infoPlay" class="btn primary small">Enter</button></div>
+        </aside>
+    </section>
+
+    <!-- ============ HUD ============ -->
+    <section id="hud" class="hidden" aria-label="Level controls">
+        <div class="hudTop">
+            <div class="glass pill levelTag">
+                <span class="mono" id="hudNum">01</span>
+                <span id="hudName">First Light</span>
+            </div>
+            <div class="glass pill dust" id="dustPips" aria-label="Stardust collected">
+                <i></i><i></i><i></i>
+            </div>
+            <div class="hudBtns">
+                <button class="iconBtn glass" id="hintBtn" aria-label="Show a hint (H)" title="Hint (H)"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.8.8 1 1.5 1 2.5h6c0-1 .2-1.7 1-2.5A6 6 0 0 0 12 3z"/></svg></button>
+                <button class="iconBtn glass" id="undoBtn" aria-label="Remove last body (Z)" title="Undo (Z)"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+                <button class="iconBtn glass" id="pauseBtn" aria-label="Pause (Esc)" title="Pause (Esc)"><svg viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg></button>
+            </div>
+        </div>
+        <p id="statusLine" class="status" aria-live="polite"></p>
+        <div class="dock glass">
+            <div id="inventory" class="inventory" role="group" aria-label="Bodies you can place"></div>
+            <button id="launchBtn" class="launch" aria-label="Launch the comet (Space)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M12 5l7 7-7 7"/></svg>
+                <span id="launchLabel">Launch</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- ============ RESULT ============ -->
+    <section id="result" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+        <div class="card glass">
+            <p class="eyebrow" id="resultNum">SYSTEM 01</p>
+            <h2 id="resultTitle">Orbit complete</h2>
+            <div class="bigStars" id="resultStars"><span>★</span><span>★</span><span>★</span></div>
+            <p class="dim" id="resultText"></p>
+            <div class="facts">
+                <div><small>FLIGHT</small><b class="mono" id="factTime">0.0s</b></div>
+                <div><small>BODIES</small><b class="mono" id="factBodies">0</b></div>
+                <div><small>STARDUST</small><b class="mono" id="factDust">0/3</b></div>
+            </div>
+            <div class="actions">
+                <button id="nextBtn" class="btn primary">Next system →</button>
+                <button id="replayBtn" class="btn">Replay</button>
+                <button id="resultChart" class="btn ghost">Star chart</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ PAUSE / SETTINGS ============ -->
+    <section id="pause" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+        <div class="card glass">
+            <h2 id="pauseTitle">Paused</h2>
+            <div class="actions col">
+                <button id="resumeBtn" class="btn primary">Resume</button>
+                <button id="restartBtn" class="btn">Clear the board</button>
+                <button class="btn" data-open="settings">Settings</button>
+                <button id="pauseChart" class="btn">Star chart</button>
+                <button id="pauseTitleBtn" class="btn ghost">Title screen</button>
+            </div>
+        </div>
+    </section>
+
+    <section id="settings" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="card glass left">
+            <div class="row head"><h2 id="settingsTitle">Settings</h2><button class="iconBtn" data-close aria-label="Close settings"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <label class="setRow"><span>Sound effects</span><input id="setSfx" type="range" min="0" max="1" step="0.05"></label>
+            <label class="setRow"><span>Ambient music</span><input id="setMusic" type="range" min="0" max="1" step="0.05"></label>
+            <label class="setRow"><span>Bloom and glow<small>Turn off on slower devices</small></span><input id="setBloom" type="checkbox" class="switch"></label>
+            <label class="setRow"><span>Reduce motion<small>No camera shake or drift, fewer particles</small></span><input id="setMotion" type="checkbox" class="switch"></label>
+            <div class="setRow"><span>Progress<small>Unlocked systems and stars</small></span><button id="resetProgress" class="btn small danger">Reset</button></div>
+            <div class="help">
+                <p class="eyebrow">CONTROLS</p>
+                <p><kbd>Drag</kbd> a body from the dock onto the grid · drag it again to move · <kbd>Double-click</kbd> or drag it back to remove</p>
+                <p><kbd>Space</kbd> launch · <kbd>R</kbd> stop the flight · <kbd>F</kbd> hold to fast-forward · <kbd>H</kbd> hint · <kbd>Z</kbd> undo · <kbd>Esc</kbd> pause</p>
+            </div>
+        </div>
+    </section>
+
+    <div id="toast" class="toast glass" role="status" aria-live="polite"></div>
+
+    <script type="module" src="game/main.js"></script>
+</body>
+
+</html>
